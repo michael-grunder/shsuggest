@@ -198,15 +198,47 @@ PROMPT;
      */
     private function decodeJson(string $raw, string $expectedKey): array
     {
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            throw new OllamaClientException(sprintf(
-                'Failed to decode JSON with expected "%s" key. Raw response: %s',
-                $expectedKey,
-                $raw
-            ));
+        foreach ($this->candidateJsonStrings($raw) as $candidate) {
+            $decoded = json_decode($candidate, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
         }
 
-        return $decoded;
+        throw new OllamaClientException(sprintf(
+            'Failed to decode JSON with expected "%s" key. Raw response: %s',
+            $expectedKey,
+            $raw
+        ));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function candidateJsonStrings(string $raw): array
+    {
+        $raw = trim($raw);
+        $candidates = [$raw];
+
+        if (preg_match('/```[a-z0-9]*\s*(.*?)```/is', $raw, $match)) {
+            $candidates[] = trim($match[1]);
+        }
+
+        foreach (['response', 'json'] as $tag) {
+            $pattern = sprintf('/<%1$s>(.*?)<\/%1$s>/is', preg_quote($tag, '/'));
+            if (preg_match($pattern, $raw, $match)) {
+                $candidates[] = trim($match[1]);
+            }
+        }
+
+        if (preg_match('/\{(?:[^{}]|(?R))*\}/s', $raw, $match)) {
+            $candidates[] = trim($match[0]);
+        }
+
+        $candidates = array_values(array_unique(array_filter($candidates, static function (string $value): bool {
+            return $value !== '';
+        })));
+
+        return $candidates === [] ? [$raw] : $candidates;
     }
 }
