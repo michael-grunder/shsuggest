@@ -9,7 +9,7 @@ final class Config
     private const DEFAULTS = [
         'model' => 'gemma3',
         'ollama_endpoint' => 'http://127.0.0.1:11434',
-        'num_suggestions' => 3,
+        'num_suggestions' => 1,
         'temperature' => 0.3,
         'num_thread' => null,
         'pipe_first_into' => null,
