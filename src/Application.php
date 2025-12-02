@@ -352,10 +352,6 @@ final class Application
 
                 if ($arg === '--widget') {
                     $mode = 'widget';
-                    $peek = $args[0] ?? null;
-                    if ($peek !== null && !str_starts_with($peek, '-')) {
-                        $widgetBinding = array_shift($args);
-                    }
                     continue;
                 }
 
