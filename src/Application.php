@@ -79,7 +79,7 @@ final class Application
         $suggestions = $this->client->suggest($prompt, $requested);
 
         $pipeProgram = $this->config->getPipeProgram();
-        if ($pipeProgram !== null) {
+        if ($pipeProgram !== null && $this->isTty(STDOUT)) {
             $this->safePipe($pipeProgram, $suggestions[0]->getCommand());
         }
 
