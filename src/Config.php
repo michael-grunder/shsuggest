@@ -7,7 +7,7 @@ namespace Mike\Shsuggest;
 final class Config
 {
     private const DEFAULTS = [
-        'model' => 'llama3',
+        'model' => 'gemma3',
         'ollama_endpoint' => 'http://127.0.0.1:11434',
         'num_suggestions' => 3,
         'temperature' => 0.3,

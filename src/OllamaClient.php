@@ -141,11 +141,13 @@ PROMPT;
         $url = $this->endpoint . $path;
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
 
-        if (function_exists('curl_init')) {
-            $result = $this->postWithCurl($url, $body);
-        } else {
-            $result = $this->postWithStream($url, $body);
+        if (!function_exists('curl_init')) {
+            throw new OllamaClientException(
+                'The cURL extension is required to contact Ollama. Please enable the "curl" PHP extension.'
+            );
         }
+
+        $result = $this->postWithCurl($url, $body);
 
         $decoded = json_decode($result, true);
         if (!is_array($decoded)) {
@@ -186,37 +188,6 @@ PROMPT;
 
         if ($status >= 400) {
             throw new OllamaClientException(sprintf('Ollama returned HTTP %d: %s', $status, $result));
-        }
-
-        return $result;
-    }
-
-    private function postWithStream(string $url, string $body): string
-    {
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => implode("\r\n", [
-                    'Content-Type: application/json',
-                    'Accept: application/json',
-                    'Content-Length: ' . strlen($body),
-                ]) . "\r\n",
-                'content' => $body,
-                'timeout' => $this->timeout,
-            ],
-        ]);
-
-        $result = @file_get_contents($url, false, $context);
-        if ($result === false) {
-            $error = error_get_last();
-            throw new OllamaClientException(
-                'Network error while contacting Ollama' . ($error ? ': ' . $error['message'] : '.')
-            );
-        }
-
-        $statusLine = $http_response_header[0] ?? '';
-        if (!str_contains($statusLine, '200')) {
-            throw new OllamaClientException('Ollama returned unexpected status: ' . $statusLine);
         }
 
         return $result;
