@@ -91,13 +91,13 @@ final class Application
 
         $requested = max(1, $options['num'] ?? $this->config->getNumSuggestions());
         $suggestions = $this->client->suggest($prompt, $requested);
-
         $pipeProgram = $this->config->getPipeProgram();
-        if ($pipeProgram !== null && $this->isTty(STDOUT)) {
-            $this->safePipe($pipeProgram, $suggestions[0]->getCommand());
-        }
 
         if ($asJson) {
+            if ($pipeProgram !== null && $this->isTty(STDOUT)) {
+                $this->safePipe($pipeProgram, $suggestions[0]->getCommand());
+            }
+
             $this->writeJson([
                 'mode' => 'suggest',
                 'prompt' => $prompt,
@@ -118,6 +118,11 @@ final class Application
         }
 
         $choice = $shouldPrompt ? $this->interactiveChoice($suggestions) : $suggestions[0];
+
+        if ($pipeProgram !== null && $this->isTty(STDOUT)) {
+            $this->safePipe($pipeProgram, $choice->getCommand());
+        }
+
         $deferredDescription = $this->renderSelectedSuggestion($choice, $shouldPrompt);
 
         if (!$this->isTty(STDOUT)) {
@@ -401,7 +406,7 @@ HELP;
         try {
             $this->pipeRunner->pipe($program, $payload);
             $message = sprintf(
-                '%s First suggestion piped into "%s".',
+                '%s Selected suggestion piped into "%s".',
                 $this->style('📤', 'accent', STDERR),
                 $program
             );
