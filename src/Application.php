@@ -619,7 +619,7 @@ HELP;
 
     private function announceShellWidgetInvocation(): void
     {
-        $message = $this->style('Thinking...', 'muted', STDERR);
+        $message = $this->style("\n[shsuggest] Thinking...", 'muted', STDERR);
         fwrite(STDERR, $message . PHP_EOL);
     }
 
