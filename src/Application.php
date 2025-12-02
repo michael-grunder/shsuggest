@@ -65,9 +65,16 @@ final class Application
         $options = $this->parseArguments($argv);
         $mode = $options['mode'];
         $help = $options['help'];
+        $version = $options['version'];
         $args = $options['args'];
         $asJson = $options['json'];
         $shellIntegration = $options['shell'];
+
+        if ($version) {
+            $this->printVersion();
+
+            return 0;
+        }
 
         if ($help) {
             $this->printHelp();
@@ -195,13 +202,13 @@ final class Application
         try {
             $options = [];
             foreach ($suggestions as $index => $suggestion) {
-                $options[(string) $index] = $this->formatInteractiveOption($index, $suggestion);
+                $options[] = $this->formatInteractiveOption($index, $suggestion);
             }
 
             $selection = select(
                 label: '✨ Suggestions',
                 options: $options,
-                default: '0',
+                default: $options[0] ?? null,
                 scroll: min(10, max(5, count($options))),
                 hint: 'Use arrows or type a number, Enter to choose.',
             );
@@ -210,9 +217,23 @@ final class Application
                 return $suggestions[0];
             }
 
-            $choiceIndex = (int) $selection;
+            $choiceIndex = array_search($selection, $options, true);
+            if ($choiceIndex === false) {
+                if (is_int($selection)) {
+                    $choiceIndex = $selection;
+                } elseif (is_string($selection)) {
+                    $trimmedSelection = trim($selection);
+                    if ($trimmedSelection !== '' && ctype_digit($trimmedSelection)) {
+                        $choiceIndex = (int) $trimmedSelection - 1;
+                    }
+                }
+            }
 
-            return $suggestions[$choiceIndex] ?? $suggestions[0];
+            if (!is_int($choiceIndex) || !isset($suggestions[$choiceIndex])) {
+                $choiceIndex = 0;
+            }
+
+            return $suggestions[$choiceIndex];
         } catch (\Throwable $exception) {
             return null;
         }
@@ -321,6 +342,7 @@ final class Application
         $mode = 'suggest';
         $help = false;
         $json = false;
+        $version = false;
         $num = null;
         $shellIntegration = false;
         $widgetBinding = null;
@@ -338,6 +360,7 @@ final class Application
         $help = (bool) $input->getOption('help');
         $json = (bool) $input->getOption('json');
         $shellIntegration = (bool) ($input->getOption('shell') || $input->getOption('shell-integration'));
+        $version = (bool) $input->getOption('version');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
         $isExplain = (bool) $input->getOption('explain');
@@ -371,6 +394,7 @@ final class Application
         return [
             'mode' => $mode,
             'help' => $help,
+            'version' => $version,
             'json' => $json,
             'num' => $num,
             'shell' => $shellIntegration,
@@ -401,6 +425,11 @@ final class Application
         $output->writeln('');
         $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
         $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
+    }
+
+    private function printVersion(): void
+    {
+        $this->writeLine(sprintf('shsuggest %s', Version::CURRENT));
     }
 
     private function isInteractive(): bool
@@ -476,6 +505,7 @@ final class Application
                 'Prompt or command tokens. Use -- to treat subsequent values literally when they start with "-".'
             ),
             new InputOption('help', 'h', InputOption::VALUE_NONE, 'Show this help message.'),
+            new InputOption('version', 'V', InputOption::VALUE_NONE, 'Show application version.'),
             new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
             new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
