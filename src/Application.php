@@ -9,7 +9,7 @@ final class Application
     private const STYLE_CODES = [
         'title' => '1;36',
         'command' => '1;32',
-        'muted' => '90',
+        'muted' => '37',
         'accent' => '35',
         'number' => '1;34',
         'error' => '1;31',
