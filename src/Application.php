@@ -9,7 +9,7 @@ final class Application
     private const STYLE_CODES = [
         'title' => '1;36',
         'command' => '1;32',
-        'muted' => '2;37',
+        'muted' => '90',
         'accent' => '35',
         'number' => '1;34',
         'error' => '1;31',
@@ -104,10 +104,13 @@ final class Application
         }
 
         $choice = $shouldPrompt ? $this->interactiveChoice($suggestions) : $suggestions[0];
-        $this->renderSelectedSuggestion($choice, $shouldPrompt);
+        $deferredDescription = $this->renderSelectedSuggestion($choice, $shouldPrompt);
 
         if (!$this->isTty(STDOUT)) {
             $this->echoCommandToStderr($choice->getCommand());
+            if ($deferredDescription !== null) {
+                $this->writeDescription($deferredDescription);
+            }
         }
 
         return 0;
@@ -368,7 +371,7 @@ HELP;
         $this->writeLine($explanation);
     }
 
-    private function renderSelectedSuggestion(Suggestion $suggestion, bool $fromInteractive): void
+    private function renderSelectedSuggestion(Suggestion $suggestion, bool $fromInteractive): ?string
     {
         if ($fromInteractive && $this->isTty(STDERR)) {
             fwrite(STDERR, PHP_EOL . $this->style('✔ Selected suggestion', 'title', STDERR) . PHP_EOL);
@@ -377,14 +380,22 @@ HELP;
         $this->writeLine($this->style($suggestion->getCommand(), 'command', STDOUT));
 
         $description = $suggestion->getDescription();
-        if ($description !== '') {
-            $line = sprintf(
-                ' %s %s',
-                $this->style('↳', 'muted', STDERR),
-                $this->style($description, 'muted', STDERR)
-            );
-            fwrite(STDERR, $line . PHP_EOL);
+        $shouldDeferDescription = !$this->isTty(STDOUT);
+        if ($description !== '' && !$shouldDeferDescription) {
+            $this->writeDescription($description);
         }
+
+        return $shouldDeferDescription ? $description : null;
+    }
+
+    private function writeDescription(string $description): void
+    {
+        $line = sprintf(
+            ' %s %s',
+            $this->style('↳', 'muted', STDERR),
+            $this->style($description, 'muted', STDERR)
+        );
+        fwrite(STDERR, $line . PHP_EOL);
     }
 
     private function echoCommandToStderr(string $command): void
