@@ -108,6 +108,10 @@ final class Application
             throw new \RuntimeException('--shell can only be used when requesting suggestions.');
         }
 
+        if ($shellIntegration && $this->isShellWidgetInvocation()) {
+            $this->announceShellWidgetInvocation();
+        }
+
         $requested = $shellIntegration
             ? 1
             : max(1, $options['num'] ?? $this->config->getNumSuggestions());
@@ -608,6 +612,17 @@ HELP;
         return $formatter;
     }
 
+    private function isShellWidgetInvocation(): bool
+    {
+        return getenv('SHSUGGEST_WIDGET') !== false;
+    }
+
+    private function announceShellWidgetInvocation(): void
+    {
+        $message = $this->style('Thinking...', 'muted', STDERR);
+        fwrite(STDERR, $message . PHP_EOL);
+    }
+
     private function emitShellWidget(string $binding, string $shell, array $argv): void
     {
         $binding = $binding !== '' ? $binding : self::DEFAULT_WIDGET_BINDING;
@@ -634,7 +649,7 @@ HELP;
 _shsuggest_widget() {
     local current cmd
     current=$READLINE_LINE
-    cmd="$(__BINARY__ --shell -- "$current")" || return
+    cmd="$(SHSUGGEST_WIDGET=1 __BINARY__ --shell -- "$current")" || return
     READLINE_LINE=$cmd
     READLINE_POINT=${#READLINE_LINE}
 }
@@ -655,7 +670,7 @@ BASH;
 _shsuggest_widget() {
     local buffer cmd
     buffer=$BUFFER
-    cmd="$(__BINARY__ --shell -- "$buffer")" || return
+    cmd="$(SHSUGGEST_WIDGET=1 __BINARY__ --shell -- "$buffer")" || return
     BUFFER=$cmd
     CURSOR=${#BUFFER}
     zle reset-prompt
