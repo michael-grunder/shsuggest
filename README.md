@@ -26,6 +26,7 @@ shsuggest -e|--explain [COMMAND]
 * If no prompt/command is provided, `shsuggest` reads from STDIN.
 * A single command is printed by default so it can be piped into other tooling. Pass `-n 3` (or any value > 1) from a TTY to browse suggestions interactively.
 * Use `--json` (or `-j`) to emit machine-readable output; interactive prompts are skipped automatically in this mode.
+* Use `--shell` when invoking from shell widgets/integration so only the selected suggestion is written to STDOUT.
 * When STDOUT is not a TTY, the selected command is also echoed to STDERR so you can still see/copy it while piping.
 
 Examples:
@@ -37,6 +38,22 @@ shsuggest -n 3 "prepare a git release"
 shsuggest --explain 'find . -name "*.log" -delete'
 shsuggest --json 'list running docker containers with ids'
 ```
+
+### Shell widgets
+
+Generate a ready-to-use Bash/Zsh widget that binds <kbd>Ctrl</kbd>+<kbd>G</kbd> (or your preferred key sequence) to `shsuggest`:
+
+```bash
+eval "$(shsuggest --widget)"
+```
+
+The widget calls `shsuggest --shell -- "$BUFFER"` (or `"$READLINE_LINE"` in Bash) so only the final command is printed, which makes it safe to capture inside the keybinding. To choose a different binding, pass the key sequence directly:
+
+```bash
+eval "$(shsuggest --widget='\C-r')"
+```
+
+Re-run the command whenever you update the binary so the hook stays in sync.
 
 ## Configuration
 

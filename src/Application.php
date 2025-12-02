@@ -25,6 +25,8 @@ final class Application
         'error' => ['red', null, ['bold']],
     ];
 
+    private const DEFAULT_WIDGET_BINDING = '\C-g';
+
     private PipeRunner $pipeRunner;
     private OutputFormatter $stdoutFormatter;
     private OutputFormatter $stderrFormatter;
@@ -57,9 +59,17 @@ final class Application
         $help = $options['help'];
         $args = $options['args'];
         $asJson = $options['json'];
+        $shellIntegration = $options['shell'];
 
         if ($help) {
             $this->printHelp();
+
+            return 0;
+        }
+
+        if ($mode === 'widget') {
+            $binding = $options['widget_binding'] ?? self::DEFAULT_WIDGET_BINDING;
+            $this->emitShellWidget($binding, $argv);
 
             return 0;
         }
@@ -89,9 +99,15 @@ final class Application
             throw new \RuntimeException('No prompt provided for suggestions.');
         }
 
-        $requested = max(1, $options['num'] ?? $this->config->getNumSuggestions());
+        if ($shellIntegration && $mode !== 'suggest') {
+            throw new \RuntimeException('--shell can only be used when requesting suggestions.');
+        }
+
+        $requested = $shellIntegration
+            ? 1
+            : max(1, $options['num'] ?? $this->config->getNumSuggestions());
         $suggestions = $this->client->suggest($prompt, $requested);
-        $pipeProgram = $this->config->getPipeProgram();
+        $pipeProgram = $shellIntegration ? null : $this->config->getPipeProgram();
 
         if ($asJson) {
             if ($pipeProgram !== null && $this->isTty(STDOUT)) {
@@ -107,7 +123,7 @@ final class Application
             return 0;
         }
 
-        $interactive = $this->isInteractive();
+        $interactive = $shellIntegration ? false : $this->isInteractive();
         $shouldPrompt = $interactive && $requested > 1;
         if ($requested > 1 && !$interactive) {
             $message = sprintf(
@@ -118,6 +134,12 @@ final class Application
         }
 
         $choice = $shouldPrompt ? $this->interactiveChoice($suggestions) : $suggestions[0];
+
+        if ($shellIntegration) {
+            $this->writeLine($choice->getCommand());
+
+            return 0;
+        }
 
         if ($pipeProgram !== null && $this->isTty(STDOUT)) {
             $this->safePipe($pipeProgram, $choice->getCommand());
@@ -270,6 +292,8 @@ final class Application
      *     help: bool,
      *     json: bool,
      *     num: ?int,
+     *     shell: bool,
+     *     widget_binding: ?string,
      *     args: array<int, string>
      * }
      */
@@ -282,6 +306,8 @@ final class Application
         $help = false;
         $json = false;
         $num = null;
+        $shellIntegration = false;
+        $widgetBinding = null;
         $remaining = [];
         $collect = false;
 
@@ -309,6 +335,26 @@ final class Application
 
                 if ($arg === '--json' || $arg === '-j') {
                     $json = true;
+                    continue;
+                }
+
+                if ($arg === '--shell' || $arg === '--shell-integration') {
+                    $shellIntegration = true;
+                    continue;
+                }
+
+                if ($arg === '--widget') {
+                    $mode = 'widget';
+                    $peek = $args[0] ?? null;
+                    if ($peek !== null && !str_starts_with($peek, '-')) {
+                        $widgetBinding = array_shift($args);
+                    }
+                    continue;
+                }
+
+                if (str_starts_with($arg, '--widget=')) {
+                    $mode = 'widget';
+                    $widgetBinding = substr($arg, 9);
                     continue;
                 }
 
@@ -344,6 +390,8 @@ final class Application
             'help' => $help,
             'json' => $json,
             'num' => $num,
+             'shell' => $shellIntegration,
+             'widget_binding' => $widgetBinding,
             'args' => array_values($remaining),
         ];
     }
@@ -356,6 +404,8 @@ shsuggest [OPTIONS] [PROMPT]
 Options:
   -e, --explain   Explain the provided shell command instead of generating suggestions.
   -n, --num N     Request N suggestions (default 1). When N > 1 and a TTY is available, you'll be prompted to choose.
+  --shell         Emit only the selected suggestion for shell integration widgets.
+  --widget[=KEY]  Print a ready-to-use shell widget (default binding CTRL+G).
   -j, --json      Emit machine-readable JSON.
   -h, --help      Show this help message.
 
@@ -546,5 +596,39 @@ HELP;
         }
 
         return $formatter;
+    }
+
+    private function emitShellWidget(string $binding, array $argv): void
+    {
+        $binding = $binding !== '' ? $binding : self::DEFAULT_WIDGET_BINDING;
+        $escapedBinding = str_replace('"', '\"', $binding);
+
+        $binary = $argv[0] ?? 'shsuggest';
+        if ($binary === '') {
+            $binary = 'shsuggest';
+        }
+
+        $resolved = @realpath($binary);
+        if ($resolved !== false) {
+            $binary = $resolved;
+        }
+
+        $binary = escapeshellarg($binary);
+
+        $widget = <<<'BASH'
+# shsuggest readline widget
+_shsuggest_widget() {
+    local current cmd
+    current=$READLINE_LINE
+    cmd="$(__BINARY__ --shell -- "$current")" || return
+    READLINE_LINE=$cmd
+    READLINE_POINT=${#READLINE_LINE}
+}
+
+bind -x '"__BINDING__":"_shsuggest_widget"'
+BASH;
+
+        $widget = str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
+        $this->writeLine($widget);
     }
 }
