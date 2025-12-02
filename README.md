@@ -44,6 +44,7 @@ model=llama3
 ollama_endpoint=http://127.0.0.1:11434
 num_suggestions=3
 temperature=0.35
+num_thread=32
 request_timeout=30
 pipe_first_into=pbcopy
 ```
@@ -51,3 +52,6 @@ pipe_first_into=pbcopy
 The `pipe_first_into` entry lets you feed the first suggestion into another program (for example, `pbcopy` on
 macOS to copy the command to the clipboard). Even when multiple suggestions are shown interactively, only the
 first suggestion is piped.
+
+`num_thread` is forwarded to Ollama's `options.num_thread` field, which can be used when targeting models that
+benefit from a specific thread count.

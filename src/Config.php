@@ -11,6 +11,7 @@ final class Config
         'ollama_endpoint' => 'http://127.0.0.1:11434',
         'num_suggestions' => 3,
         'temperature' => 0.3,
+        'num_thread' => null,
         'pipe_first_into' => null,
         'request_timeout' => 30,
     ];
@@ -41,6 +42,18 @@ final class Config
     public function getTemperature(): float
     {
         return (float) $this->values['temperature'];
+    }
+
+    public function getNumThread(): ?int
+    {
+        $value = $this->values['num_thread'] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $int = (int) $value;
+
+        return $int > 0 ? $int : null;
     }
 
     public function getPipeProgram(): ?string

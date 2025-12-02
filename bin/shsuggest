@@ -15,7 +15,8 @@ $client = new OllamaClient(
     $config->getOllamaEndpoint(),
     $config->getModel(),
     $config->getTemperature(),
-    $config->getRequestTimeout()
+    $config->getRequestTimeout(),
+    $config->getNumThread()
 );
 
 $app = new Application($config, $client);

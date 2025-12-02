@@ -12,7 +12,8 @@ final class OllamaClient
         private string $endpoint,
         private string $model,
         private float $temperature = 0.3,
-        private int $timeout = 30
+        private int $timeout = 30,
+        private ?int $numThreads = null
     ) {
         $this->endpoint = rtrim($this->endpoint, '/');
     }
@@ -117,6 +118,10 @@ PROMPT;
                 'temperature' => $this->temperature,
             ],
         ];
+
+        if ($this->numThreads !== null) {
+            $payload['options']['num_thread'] = $this->numThreads;
+        }
 
         $response = $this->post('/api/generate', $payload);
 
