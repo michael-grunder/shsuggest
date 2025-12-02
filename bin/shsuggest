@@ -1,0 +1,22 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Mike\Shsuggest\Application;
+use Mike\Shsuggest\ConfigLoader;
+use Mike\Shsuggest\OllamaClient;
+
+$loader = new ConfigLoader();
+$config = $loader->load();
+$client = new OllamaClient(
+    $config->getOllamaEndpoint(),
+    $config->getModel(),
+    $config->getTemperature(),
+    $config->getRequestTimeout()
+);
+
+$app = new Application($config, $client);
+exit($app->run($argv));

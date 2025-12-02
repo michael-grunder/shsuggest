@@ -14,5 +14,13 @@
             "email": "michael.grunder@gmail.com"
         }
     ],
-    "require": {}
+    "require": {
+        "php": "^8.1"
+    },
+    "bin": [
+        "bin/shsuggest"
+    ],
+    "scripts": {
+        "build-phar": "php build-phar.php"
+    }
 }
