@@ -7,7 +7,7 @@ and ships as a single PHAR for easy distribution.
 
 ## Installation
 
-```
+```bash
 composer install
 php -d phar.readonly=0 build-phar.php
 mv shsuggest.phar /usr/local/bin/shsuggest
@@ -18,7 +18,7 @@ chmod +x /usr/local/bin/shsuggest
 
 ## Usage
 
-```
+```bash
 shsuggest [PROMPT]
 shsuggest -e|--explain [COMMAND]
 ```
@@ -29,7 +29,7 @@ shsuggest -e|--explain [COMMAND]
 
 Examples:
 
-```
+```bash
 shsuggest "list the 5 largest directories"
 echo "remove old node_modules folders" | shsuggest
 shsuggest --explain 'find . -name "*.log" -delete'
@@ -39,7 +39,7 @@ shsuggest --explain 'find . -name "*.log" -delete'
 
 `shsuggest` looks for a simple `key=value` dotfile at `~/.shsuggest`. All settings are optional:
 
-```
+```ini
 model=llama3
 ollama_endpoint=http://127.0.0.1:11434
 num_suggestions=3
