@@ -4,8 +4,16 @@ declare(strict_types=1);
 
 namespace Mike\Shsuggest;
 
+use Symfony\Component\Console\Exception\InvalidArgumentException as ConsoleInvalidArgumentException;
+use Symfony\Component\Console\Exception\RuntimeException as ConsoleRuntimeException;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Formatter\OutputFormatterStyle;
+use Symfony\Component\Console\Helper\DescriptorHelper;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputDefinition;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\StreamOutput;
 use function Laravel\Prompts\select;
 
 final class Application
@@ -309,9 +317,7 @@ final class Application
      */
     private function parseArguments(array $argv): array
     {
-        $args = $argv;
-        array_shift($args);
-
+        $definition = $this->createInputDefinition();
         $mode = 'suggest';
         $help = false;
         $json = false;
@@ -319,77 +325,42 @@ final class Application
         $shellIntegration = false;
         $widgetBinding = null;
         $widgetShell = null;
-        $remaining = [];
-        $collect = false;
 
-        while ($args !== []) {
-            $arg = array_shift($args);
-            if ($arg === null) {
-                break;
+        try {
+            $input = new ArgvInput($argv, $definition);
+        } catch (ConsoleRuntimeException | ConsoleInvalidArgumentException $exception) {
+            throw new \RuntimeException($exception->getMessage(), 0, $exception);
+        }
+
+        /** @var list<string> $remaining */
+        $remaining = $input->getArgument('args');
+
+        $help = (bool) $input->getOption('help');
+        $json = (bool) $input->getOption('json');
+        $shellIntegration = (bool) ($input->getOption('shell') || $input->getOption('shell-integration'));
+
+        $hasWidgetOption = $input->hasParameterOption('--widget');
+        $isExplain = (bool) $input->getOption('explain');
+        if ($hasWidgetOption && $isExplain) {
+            throw new \RuntimeException('The --widget option cannot be combined with --explain.');
+        }
+
+        $widgetOptionValue = $input->getOption('widget');
+        if ($hasWidgetOption) {
+            $mode = 'widget';
+            $bindingProvidedInline = $this->widgetBindingProvidedInline($input);
+            if ($bindingProvidedInline) {
+                $widgetBinding = $widgetOptionValue === null ? null : (string) $widgetOptionValue;
+            } elseif ($widgetOptionValue !== null) {
+                array_unshift($remaining, (string) $widgetOptionValue);
             }
+        } elseif ($isExplain) {
+            $mode = 'explain';
+        }
 
-            if ($arg === '--') {
-                $collect = true;
-                continue;
-            }
-
-            if (!$collect) {
-                if ($arg === '-h' || $arg === '--help') {
-                    $help = true;
-                    continue;
-                }
-
-                if ($arg === '-e' || $arg === '--explain') {
-                    $mode = 'explain';
-                    continue;
-                }
-
-                if ($arg === '--json' || $arg === '-j') {
-                    $json = true;
-                    continue;
-                }
-
-                if ($arg === '--shell' || $arg === '--shell-integration') {
-                    $shellIntegration = true;
-                    continue;
-                }
-
-                if ($arg === '--widget') {
-                    $mode = 'widget';
-                    continue;
-                }
-
-                if (str_starts_with($arg, '--widget=')) {
-                    $mode = 'widget';
-                    $widgetBinding = substr($arg, 9);
-                    continue;
-                }
-
-                if ($arg === '-n' || $arg === '--num') {
-                    $value = array_shift($args);
-                    if ($value === null) {
-                        throw new \RuntimeException(sprintf('Option "%s" expects a value.', $arg));
-                    }
-
-                    $num = $this->parsePositiveIntOption($value, $arg);
-
-                    continue;
-                }
-
-                if (preg_match('/^-n([0-9]+)$/', $arg, $matches)) {
-                    $num = $this->parsePositiveIntOption($matches[1], '-n');
-                    continue;
-                }
-
-                if (str_starts_with($arg, '--num=')) {
-                    $value = substr($arg, 6);
-                    $num = $this->parsePositiveIntOption($value, '--num');
-                    continue;
-                }
-            }
-
-            $collect = true;
-            $remaining[] = $arg;
+        $numOption = $input->getOption('num');
+        if ($numOption !== null) {
+            $num = $this->parsePositiveIntOption((string) $numOption, $this->detectNumOptionName($input));
         }
 
         if ($mode === 'widget') {
@@ -411,24 +382,25 @@ final class Application
 
     private function printHelp(): void
     {
-        $help = <<<HELP
-shsuggest [OPTIONS] [PROMPT]
+        $output = new StreamOutput(
+            STDOUT,
+            StreamOutput::VERBOSITY_NORMAL,
+            $this->isTty(STDOUT),
+            $this->stdoutFormatter
+        );
 
-Options:
-  -e, --explain   Explain the provided shell command instead of generating suggestions.
-  -n, --num N     Request N suggestions (default 1). When N > 1 and a TTY is available, you'll be prompted to choose.
-  --shell         Emit only the selected suggestion for shell integration widgets.
-  --widget[=KEY]  Print a ready-to-use shell widget for the provided shell (bash or zsh).
-                  Provide the shell name as the final argument.
-  -j, --json      Emit machine-readable JSON.
-  -h, --help      Show this help message.
+        $output->writeln('<info>Usage:</info>');
+        $output->writeln('  shsuggest [options] [--] [PROMPT]');
+        $output->writeln('');
+        $output->writeln('Generate shell suggestions from a prompt or explain an existing command.');
+        $output->writeln('');
 
-PROMPT or COMMAND values can also be provided via STDIN when omitted. By default only a single command is
-printed so that it can be piped into other tooling. Pass -n greater than 1 from an interactive terminal to
-browse multiple suggestions.
-HELP;
+        $descriptor = new DescriptorHelper();
+        $descriptor->describe($output, $this->createInputDefinition());
 
-        $this->writeLine($help);
+        $output->writeln('');
+        $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
+        $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
     }
 
     private function isInteractive(): bool
@@ -493,6 +465,60 @@ HELP;
         }
 
         return $num;
+    }
+
+    private function createInputDefinition(): InputDefinition
+    {
+        return new InputDefinition([
+            new InputArgument(
+                'args',
+                InputArgument::IS_ARRAY,
+                'Prompt or command tokens. Use -- to treat subsequent values literally when they start with "-".'
+            ),
+            new InputOption('help', 'h', InputOption::VALUE_NONE, 'Show this help message.'),
+            new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
+            new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
+            new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
+            new InputOption('shell', null, InputOption::VALUE_NONE, 'Emit only the selected suggestion for shell integration widgets.'),
+            new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
+            new InputOption(
+                'widget',
+                null,
+                InputOption::VALUE_OPTIONAL,
+                sprintf(
+                    'Print a ready-to-use shell widget for bash or zsh. Provide the shell name as the final argument and optionally override the key binding (default %s).',
+                    self::DEFAULT_WIDGET_BINDING
+                )
+            ),
+        ]);
+    }
+
+    private function detectNumOptionName(ArgvInput $input): string
+    {
+        $option = '--num';
+        foreach ($input->getRawTokens() as $token) {
+            if (str_starts_with($token, '--num')) {
+                $option = '--num';
+                continue;
+            }
+
+            if (str_starts_with($token, '-n')) {
+                $option = '-n';
+            }
+        }
+
+        return $option;
+    }
+
+    private function widgetBindingProvidedInline(ArgvInput $input): bool
+    {
+        foreach ($input->getRawTokens() as $token) {
+            if (str_starts_with($token, '--widget=')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function renderExplanation(string $command, string $explanation): void
