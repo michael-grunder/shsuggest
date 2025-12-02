@@ -69,7 +69,12 @@ final class Application
 
         if ($mode === 'widget') {
             $binding = $options['widget_binding'] ?? self::DEFAULT_WIDGET_BINDING;
-            $this->emitShellWidget($binding, $argv);
+            $shell = $options['widget_shell'];
+            if ($shell === null || $shell === '') {
+                throw new \RuntimeException('Please specify the target shell (bash or zsh).');
+            }
+
+            $this->emitShellWidget($binding, $shell, $argv);
 
             return 0;
         }
@@ -294,6 +299,7 @@ final class Application
      *     num: ?int,
      *     shell: bool,
      *     widget_binding: ?string,
+     *     widget_shell: ?string,
      *     args: array<int, string>
      * }
      */
@@ -308,6 +314,7 @@ final class Application
         $num = null;
         $shellIntegration = false;
         $widgetBinding = null;
+        $widgetShell = null;
         $remaining = [];
         $collect = false;
 
@@ -385,13 +392,19 @@ final class Application
             $remaining[] = $arg;
         }
 
+        if ($mode === 'widget') {
+            $widgetShell = $remaining[0] ?? null;
+            $remaining = array_slice($remaining, 1);
+        }
+
         return [
             'mode' => $mode,
             'help' => $help,
             'json' => $json,
             'num' => $num,
-             'shell' => $shellIntegration,
-             'widget_binding' => $widgetBinding,
+            'shell' => $shellIntegration,
+            'widget_binding' => $widgetBinding,
+            'widget_shell' => $widgetShell,
             'args' => array_values($remaining),
         ];
     }
@@ -405,7 +418,8 @@ Options:
   -e, --explain   Explain the provided shell command instead of generating suggestions.
   -n, --num N     Request N suggestions (default 1). When N > 1 and a TTY is available, you'll be prompted to choose.
   --shell         Emit only the selected suggestion for shell integration widgets.
-  --widget[=KEY]  Print a ready-to-use shell widget (default binding CTRL+G).
+  --widget[=KEY]  Print a ready-to-use shell widget for the provided shell (bash or zsh).
+                  Provide the shell name as the final argument.
   -j, --json      Emit machine-readable JSON.
   -h, --help      Show this help message.
 
@@ -598,22 +612,26 @@ HELP;
         return $formatter;
     }
 
-    private function emitShellWidget(string $binding, array $argv): void
+    private function emitShellWidget(string $binding, string $shell, array $argv): void
     {
         $binding = $binding !== '' ? $binding : self::DEFAULT_WIDGET_BINDING;
-        $escapedBinding = str_replace('"', '\"', $binding);
+        $binary = $this->resolveBinaryPath($argv[0] ?? null);
+        $shell = strtolower($shell);
 
-        $binary = $argv[0] ?? 'shsuggest';
-        if ($binary === '') {
-            $binary = 'shsuggest';
+        if ($shell === 'zsh') {
+            $widget = $this->renderZshWidget($binary, $binding);
+        } elseif ($shell === 'bash') {
+            $widget = $this->renderBashWidget($binary, $binding);
+        } else {
+            throw new \RuntimeException(sprintf('Unsupported shell "%s". Expected "bash" or "zsh".', $shell));
         }
 
-        $resolved = @realpath($binary);
-        if ($resolved !== false) {
-            $binary = $resolved;
-        }
+        $this->writeLine($widget);
+    }
 
-        $binary = escapeshellarg($binary);
+    private function renderBashWidget(string $binary, string $binding): string
+    {
+        $escapedBinding = $this->escapeForDoubleQuotes($binding);
 
         $widget = <<<'BASH'
 # shsuggest readline widget
@@ -628,7 +646,65 @@ _shsuggest_widget() {
 bind -x '"__BINDING__":"_shsuggest_widget"'
 BASH;
 
-        $widget = str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
-        $this->writeLine($widget);
+        return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
+    }
+
+    private function renderZshWidget(string $binary, string $binding): string
+    {
+        $binding = $this->normalizeZshBinding($binding);
+        $escapedBinding = $this->escapeForDoubleQuotes($binding);
+
+        $widget = <<<'ZSH'
+# shsuggest zle widget
+_shsuggest_widget() {
+    local buffer cmd
+    buffer=$BUFFER
+    cmd="$(__BINARY__ --shell -- "$buffer")" || return
+    BUFFER=$cmd
+    CURSOR=${#BUFFER}
+    zle reset-prompt
+}
+
+zle -N shsuggest-widget _shsuggest_widget
+bindkey "__BINDING__" shsuggest-widget
+ZSH;
+
+        return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
+    }
+
+    private function resolveBinaryPath(?string $binary): string
+    {
+        $binary = $binary ?? 'shsuggest';
+        if ($binary === '') {
+            $binary = 'shsuggest';
+        }
+
+        $resolved = @realpath($binary);
+        if ($resolved !== false) {
+            $binary = $resolved;
+        }
+
+        return escapeshellarg($binary);
+    }
+
+    private function escapeForDoubleQuotes(string $value): string
+    {
+        return str_replace('"', '\"', $value);
+    }
+
+    private function normalizeZshBinding(string $binding): string
+    {
+        if ($binding === '') {
+            return '';
+        }
+
+        if (strlen($binding) === 4 && strncasecmp($binding, '\C-', 3) === 0) {
+            $char = $binding[3];
+            if (ctype_alpha($char)) {
+                return '^' . strtoupper($char);
+            }
+        }
+
+        return $binding;
     }
 }

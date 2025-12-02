@@ -41,16 +41,25 @@ shsuggest --json 'list running docker containers with ids'
 
 ### Shell widgets
 
-Generate a ready-to-use Bash/Zsh widget that binds <kbd>Ctrl</kbd>+<kbd>G</kbd> (or your preferred key sequence) to `shsuggest`:
+Generate a ready-to-use widget that binds <kbd>Ctrl</kbd>+<kbd>G</kbd> (or your preferred key sequence) to `shsuggest`.
+Pass the shell you want to configure (`bash` or `zsh`) as the final argument:
 
 ```bash
-eval "$(shsuggest --widget)"
+# Bash
+eval "$(shsuggest --widget bash)"
+
+# Zsh
+eval "$(shsuggest --widget zsh)"
 ```
 
 The widget calls `shsuggest --shell -- "$BUFFER"` (or `"$READLINE_LINE"` in Bash) so only the final command is printed, which makes it safe to capture inside the keybinding. To choose a different binding, pass the key sequence directly:
 
 ```bash
-eval "$(shsuggest --widget='\C-r')"
+# Bash (Bash uses readline-style bindings like \C-r)
+eval "$(shsuggest --widget='\C-r' bash)"
+
+# Zsh (pass the notation accepted by bindkey, for example ^R)
+eval "$(shsuggest --widget='^R' zsh)"
 ```
 
 Re-run the command whenever you update the binary so the hook stays in sync.
