@@ -4,25 +4,38 @@ declare(strict_types=1);
 
 namespace Mike\Shsuggest;
 
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Formatter\OutputFormatterStyle;
+use function Laravel\Prompts\select;
+
 final class Application
 {
-    private const STYLE_CODES = [
-        'title' => '1;36',
-        'command' => '1;32',
-        'selected_command' => '4;32',
-        'muted' => '37',
-        'accent' => '35',
-        'number' => '1;34',
-        'error' => '1;31',
+    /**
+     * Map logical style names to Symfony Console style definitions.
+     *
+     * @var array<string, array{0:string|null,1:string|null,2:array<int,string>}>
+     */
+    private const STYLE_DEFINITIONS = [
+        'title' => ['cyan', null, ['bold']],
+        'command' => ['green', null, ['bold']],
+        'selected_command' => ['green', null, ['underscore']],
+        'muted' => ['white', null, []],
+        'accent' => ['magenta', null, ['bold']],
+        'number' => ['blue', null, ['bold']],
+        'error' => ['red', null, ['bold']],
     ];
 
     private PipeRunner $pipeRunner;
+    private OutputFormatter $stdoutFormatter;
+    private OutputFormatter $stderrFormatter;
 
     public function __construct(
         private Config $config,
         private OllamaClient $client
     ) {
         $this->pipeRunner = new PipeRunner();
+        $this->stdoutFormatter = $this->createFormatter($this->isTty(STDOUT));
+        $this->stderrFormatter = $this->createFormatter($this->isTty(STDERR));
     }
 
     public function run(array $argv): int
@@ -122,12 +135,54 @@ final class Application
      */
     private function interactiveChoice(array $suggestions): Suggestion
     {
-        $choice = $this->enhancedInteractiveChoice($suggestions);
+        $choice = $this->selectInteractiveChoice($suggestions);
         if ($choice !== null) {
             return $choice;
         }
 
         return $this->legacyInteractiveChoice($suggestions);
+    }
+
+    /**
+     * @param Suggestion[] $suggestions
+     */
+    private function selectInteractiveChoice(array $suggestions): ?Suggestion
+    {
+        try {
+            $options = [];
+            foreach ($suggestions as $index => $suggestion) {
+                $options[(string) $index] = $this->formatInteractiveOption($index, $suggestion);
+            }
+
+            $selection = select(
+                label: '✨ Suggestions',
+                options: $options,
+                default: '0',
+                scroll: min(10, max(5, count($options))),
+                hint: 'Use arrows or type a number, Enter to choose.',
+            );
+
+            if ($selection === null) {
+                return $suggestions[0];
+            }
+
+            $choiceIndex = (int) $selection;
+
+            return $suggestions[$choiceIndex] ?? $suggestions[0];
+        } catch (\Throwable $exception) {
+            return null;
+        }
+    }
+
+    private function formatInteractiveOption(int $index, Suggestion $suggestion): string
+    {
+        $number = str_pad((string) ($index + 1), 2, ' ', STR_PAD_LEFT);
+        $label = sprintf('%s ▸ %s', $number, $suggestion->getCommand());
+        $description = $suggestion->getDescription();
+
+        return $description !== ''
+            ? $label . PHP_EOL . '    ↳ ' . $description
+            : $label;
     }
 
     /**
@@ -185,293 +240,6 @@ final class Application
         return $suggestions[($choice ?? 1) - 1];
     }
 
-    /**
-     * @param Suggestion[] $suggestions
-     */
-    private function enhancedInteractiveChoice(array $suggestions): ?Suggestion
-    {
-        if (!$this->supportsEnhancedSelection()) {
-            return null;
-        }
-
-        $originalState = $this->enterRawMode();
-        if ($originalState === null) {
-            return null;
-        }
-
-        $this->hideCursor();
-
-        $selected = 0;
-
-        try {
-            $this->printInteractiveSuggestionHeading();
-            $canRestoreCursor = $this->saveCursorPosition();
-            $lineCount = $this->renderInteractiveSuggestionBlock($suggestions, $selected);
-            $max = count($suggestions);
-            $buffer = '';
-
-            while (true) {
-                $key = $this->readKeyPress();
-                if ($key === null) {
-                    break;
-                }
-
-                if ($key === 'ENTER') {
-                    break;
-                }
-
-                if ($key === 'UP') {
-                    $selected = ($selected - 1 + $max) % $max;
-                    $buffer = '';
-                    $lineCount = $this->rerenderInteractiveSuggestionBlock(
-                        $suggestions,
-                        $selected,
-                        $lineCount,
-                        $canRestoreCursor
-                    );
-
-                    continue;
-                }
-
-                if ($key === 'DOWN') {
-                    $selected = ($selected + 1) % $max;
-                    $buffer = '';
-                    $lineCount = $this->rerenderInteractiveSuggestionBlock(
-                        $suggestions,
-                        $selected,
-                        $lineCount,
-                        $canRestoreCursor
-                    );
-
-                    continue;
-                }
-
-                if ($key === 'ESC') {
-                    $selected = 0;
-                    break;
-                }
-
-                if ($key === 'BACKSPACE') {
-                    $buffer = '';
-                    continue;
-                }
-
-                if (strlen($key) === 1 && ctype_digit($key)) {
-                    $buffer .= $key;
-                    $number = (int) $buffer;
-                    if ($number < 1 || $number > $max) {
-                        $buffer = $key;
-                        $number = (int) $buffer;
-                    }
-
-                    if ($number >= 1 && $number <= $max) {
-                        $selected = $number - 1;
-                        $lineCount = $this->rerenderInteractiveSuggestionBlock(
-                            $suggestions,
-                            $selected,
-                            $lineCount,
-                            $canRestoreCursor
-                        );
-                    }
-
-                    continue;
-                }
-
-                $buffer = '';
-            }
-        } finally {
-            $this->showCursor();
-            $this->restoreTerminalState($originalState);
-        }
-
-        return $suggestions[$selected];
-    }
-
-    /**
-     * @param Suggestion[] $suggestions
-     */
-    private function renderInteractiveSuggestionBlock(array $suggestions, int $selected): int
-    {
-        $lines = 0;
-
-        foreach ($suggestions as $index => $suggestion) {
-            $count = $index + 1;
-            $num = $this->style(str_pad((string) $count, 2, ' ', STR_PAD_LEFT), 'number', STDERR);
-            $pointer = $index === $selected
-                ? $this->style('▸', 'accent', STDERR)
-                : $this->style('▹', 'muted', STDERR);
-            $commandStyle = $index === $selected ? 'selected_command' : 'command';
-            $command = $this->style($suggestion->getCommand(), $commandStyle, STDERR);
-            fwrite(STDERR, sprintf(' %s %s %s', $num, $pointer, $command) . PHP_EOL);
-            $lines++;
-
-            $desc = $suggestion->getDescription();
-            if ($desc !== '') {
-                $descColor = $index === $selected ? 'accent' : 'muted';
-                $descText = $this->style($desc, $descColor, STDERR);
-                $arrow = $this->style('↳', 'muted', STDERR);
-                fwrite(STDERR, sprintf('     %s %s', $arrow, $descText) . PHP_EOL);
-                $lines++;
-            }
-        }
-
-        fwrite(STDERR, PHP_EOL);
-        $lines++;
-
-        $instruction = sprintf(
-            '%s Use ↑/↓ arrows or numbers, Enter to choose (default 1).',
-            $this->style('❯', 'accent', STDERR)
-        );
-        fwrite(STDERR, $instruction . PHP_EOL);
-        $lines++;
-
-        return $lines;
-    }
-
-    private function printInteractiveSuggestionHeading(): void
-    {
-        fwrite(STDERR, PHP_EOL);
-        fwrite(STDERR, $this->style('✨ Suggestions', 'title', STDERR) . PHP_EOL);
-        fwrite(STDERR, PHP_EOL);
-    }
-
-    private function saveCursorPosition(): bool
-    {
-        if (!$this->supportsAnsi(STDERR)) {
-            return false;
-        }
-
-        fwrite(STDERR, "\033[s");
-
-        return true;
-    }
-
-    private function restoreCursorPosition(): bool
-    {
-        if (!$this->supportsAnsi(STDERR)) {
-            return false;
-        }
-
-        fwrite(STDERR, "\033[u");
-
-        return true;
-    }
-
-    /**
-     * @param Suggestion[] $suggestions
-     */
-    private function rerenderInteractiveSuggestionBlock(
-        array $suggestions,
-        int $selected,
-        int $linesPrinted,
-        bool $canRestoreCursor
-    ): int
-    {
-        if ($canRestoreCursor && $this->restoreCursorPosition()) {
-            fwrite(STDERR, "\033[J");
-            $this->saveCursorPosition();
-        } elseif ($linesPrinted > 0) {
-            fwrite(STDERR, sprintf("\033[%dF", $linesPrinted));
-            fwrite(STDERR, "\033[J");
-        }
-
-        return $this->renderInteractiveSuggestionBlock($suggestions, $selected);
-    }
-
-    private function readKeyPress(): ?string
-    {
-        $char = @fread(STDIN, 1);
-        if ($char === false || $char === '') {
-            return null;
-        }
-
-        if ($char === "\r" || $char === "\n") {
-            return 'ENTER';
-        }
-
-        if ($char === "\033") {
-            $next = @fread(STDIN, 1);
-            if ($next === false || $next === '') {
-                return 'ESC';
-            }
-
-            if ($next === '[') {
-                $direction = @fread(STDIN, 1);
-                if ($direction === 'A') {
-                    return 'UP';
-                }
-
-                if ($direction === 'B') {
-                    return 'DOWN';
-                }
-            }
-
-            return null;
-        }
-
-        if ($char === "\177") {
-            return 'BACKSPACE';
-        }
-
-        return $char;
-    }
-
-    private function supportsEnhancedSelection(): bool
-    {
-        if (DIRECTORY_SEPARATOR !== '/' || !function_exists('shell_exec')) {
-            return false;
-        }
-
-        return $this->isTty(STDIN) && $this->isTty(STDERR);
-    }
-
-    private function enterRawMode(): ?string
-    {
-        if (DIRECTORY_SEPARATOR !== '/' || !function_exists('shell_exec')) {
-            return null;
-        }
-
-        $current = @shell_exec('stty -g');
-        if ($current === null) {
-            return null;
-        }
-
-        $current = trim($current);
-        if ($current === '') {
-            return null;
-        }
-
-        @shell_exec('stty -icanon -echo min 1 time 0');
-
-        register_shutdown_function(function () use ($current): void {
-            $this->restoreTerminalState($current);
-        });
-
-        return $current;
-    }
-
-    private function restoreTerminalState(?string $state): void
-    {
-        if ($state === null || DIRECTORY_SEPARATOR !== '/' || !function_exists('shell_exec')) {
-            return;
-        }
-
-        @shell_exec(sprintf('stty %s', escapeshellarg($state)));
-    }
-
-    private function hideCursor(): void
-    {
-        if ($this->supportsAnsi(STDERR)) {
-            fwrite(STDERR, "\033[?25l");
-        }
-    }
-
-    private function showCursor(): void
-    {
-        if ($this->supportsAnsi(STDERR)) {
-            fwrite(STDERR, "\033[?25h");
-        }
-    }
 
     private function resolveInput(array $args, string $prompt): string
     {
@@ -743,15 +511,35 @@ HELP;
 
     private function style(string $text, string $style, $stream): string
     {
-        if (!isset(self::STYLE_CODES[$style]) || !$this->supportsAnsi($stream)) {
+        $formatter = $this->getFormatterForStream($stream);
+        if ($formatter === null || !$formatter->isDecorated() || !$formatter->hasStyle($style)) {
             return $text;
         }
 
-        return sprintf("\033[%sm%s\033[0m", self::STYLE_CODES[$style], $text);
+        return $formatter->format(sprintf('<%s>%s</>', $style, $text));
     }
 
-    private function supportsAnsi($stream): bool
+    private function getFormatterForStream($stream): ?OutputFormatter
     {
-        return $this->isTty($stream);
+        if ($stream === STDERR) {
+            return $this->stderrFormatter;
+        }
+
+        if ($stream === STDOUT) {
+            return $this->stdoutFormatter;
+        }
+
+        return null;
+    }
+
+    private function createFormatter(bool $decorated): OutputFormatter
+    {
+        $formatter = new OutputFormatter($decorated);
+
+        foreach (self::STYLE_DEFINITIONS as $name => [$foreground, $background, $options]) {
+            $formatter->setStyle($name, new OutputFormatterStyle($foreground, $background, $options));
+        }
+
+        return $formatter;
     }
 }
