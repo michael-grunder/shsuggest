@@ -49,6 +49,8 @@ final class ConfigLoader
             $values[$key] = $this->normalizeValue($value);
         }
 
+        $values = $this->validateOptions($values);
+
         return new Config($values);
     }
 
@@ -69,5 +71,59 @@ final class ConfigLoader
     public function getPath(): string
     {
         return $this->path;
+    }
+
+    /**
+     * @param array<string, string|float|int|null> $values
+     * @return array<string, string|float|int|null>
+     */
+    private function validateOptions(array $values): array
+    {
+        if (array_key_exists('num_suggestions', $values)) {
+            $parsed = $this->validateNumSuggestions($values['num_suggestions']);
+            if ($parsed === null) {
+                unset($values['num_suggestions']);
+            } else {
+                $values['num_suggestions'] = $parsed;
+            }
+        }
+
+        return $values;
+    }
+
+    private function validateNumSuggestions(string|float|int|null $value): ?int
+    {
+        if (is_int($value)) {
+            $num = $value;
+        } elseif (is_float($value)) {
+            $num = (int) $value;
+            if ((float) $num !== $value) {
+                $num = null;
+            }
+        } elseif (is_string($value) && ctype_digit($value)) {
+            $num = (int) $value;
+        } else {
+            $num = null;
+        }
+
+        if ($num === null || $num < 1) {
+            $this->warnInvalidOption($value, 'num_suggestions');
+
+            return null;
+        }
+
+        return $num;
+    }
+
+    private function warnInvalidOption(string|float|int|null $value, string $option): void
+    {
+        $formattedValue = match (true) {
+            is_int($value), is_float($value) => (string) $value,
+            $value === null => 'null',
+            default => (string) $value,
+        };
+
+        $message = sprintf('⚠ Warning: %s is not valid for %s.', $formattedValue, $option);
+        fwrite(STDERR, $message . PHP_EOL);
     }
 }

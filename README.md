@@ -78,6 +78,9 @@ request_timeout=30
 pipe_first_into=pbcopy
 ```
 
+`num_suggestions` controls the default value passed to `-n/--num` when it isn't provided explicitly.
+Invalid values are ignored (and reset to 1) with a warning.
+
 The `pipe_first_into` entry lets you feed the first suggestion into another program (for example, `pbcopy` on
 macOS to copy the command to the clipboard). Even when multiple suggestions are shown interactively, only the
 first suggestion is piped.
