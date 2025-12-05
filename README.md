@@ -95,3 +95,8 @@ benefit from a specific thread count.
 failing the request. Increase it when running slower models or reduce it if you'd like to fail fast.
 
 Run `shsuggest --show-config` at any time to confirm which settings were parsed from your dotfile.
+
+To edit the file from the CLI, use `shsuggest --config set <key> <value>`. Values are validated before being
+written—numeric fields reject invalid numbers and the `model` entry is checked against the models registered
+with your local Ollama instance. Pass `default`, `none`, or `null` as the value to remove an override and fall
+back to the built-in defaults.

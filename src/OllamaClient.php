@@ -266,6 +266,32 @@ PROMPT;
     /**
      * @return string[]
      */
+    public function listAvailableModels(): array
+    {
+        $response = $this->get('/api/tags');
+        if (!isset($response['models']) || !is_array($response['models'])) {
+            throw new OllamaClientException('Unexpected payload while listing Ollama models.');
+        }
+
+        $models = [];
+        foreach ($response['models'] as $model) {
+            if (is_array($model) && isset($model['name'])) {
+                $models[] = (string) $model['name'];
+            }
+        }
+
+        if ($models === []) {
+            throw new OllamaClientException('Ollama did not report any installed models.');
+        }
+
+        sort($models, SORT_NATURAL | SORT_FLAG_CASE);
+
+        return array_values(array_unique($models));
+    }
+
+    /**
+     * @return string[]
+     */
     private function candidateJsonStrings(string $raw): array
     {
         $raw = trim($raw);
@@ -357,5 +383,60 @@ PROMPT;
         }
 
         return $seconds;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function get(string $path): array
+    {
+        $url = $this->endpoint . $path;
+
+        if (!function_exists('curl_init')) {
+            throw new OllamaClientException(
+                'The cURL extension is required to contact Ollama. Please enable the "curl" PHP extension.'
+            );
+        }
+
+        $result = $this->getWithCurl($url);
+        $decoded = json_decode($result, true);
+        if (!is_array($decoded)) {
+            throw new OllamaClientException('Failed to decode Ollama response: ' . $result);
+        }
+
+        return $decoded;
+    }
+
+    private function getWithCurl(string $url): string
+    {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new OllamaClientException('Unable to initialize cURL.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_HTTPGET => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+            ],
+        ]);
+
+        $result = curl_exec($ch);
+        if ($result === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new OllamaClientException('cURL error while talking to Ollama: ' . $error);
+        }
+
+        $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+
+        if ($status >= 400) {
+            throw new OllamaClientException(sprintf('Ollama returned HTTP %d: %s', $status, $result));
+        }
+
+        return $result;
     }
 }

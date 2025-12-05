@@ -83,6 +83,48 @@ final class ConfigLoader
 
     /**
      * @param array<string, string|float|int|null> $values
+     */
+    public function saveValues(array $values): void
+    {
+        $directory = dirname($this->path);
+        if (!is_dir($directory)) {
+            if (!@mkdir($directory, 0777, true) && !is_dir($directory)) {
+                throw new RuntimeException(sprintf('Failed to create configuration directory: %s', $directory));
+            }
+        }
+
+        $lines = [];
+        foreach ($values as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+
+            $lines[] = sprintf('%s=%s', $key, $this->stringifyValue($value));
+        }
+
+        $contents = implode(PHP_EOL, $lines);
+        if ($contents !== '') {
+            $contents .= PHP_EOL;
+        }
+
+        if (@file_put_contents($this->path, $contents) === false) {
+            throw new RuntimeException(sprintf('Failed to write configuration file at %s.', $this->path));
+        }
+    }
+
+    private function stringifyValue(string|float|int $value): string
+    {
+        if (is_float($value)) {
+            $formatted = rtrim(rtrim(sprintf('%.10F', $value), '0'), '.');
+
+            return $formatted === '' ? '0' : $formatted;
+        }
+
+        return (string) $value;
+    }
+
+    /**
+     * @param array<string, string|float|int|null> $values
      * @return array<string, string|float|int|null>
      */
     private function validateOptions(array $values): array

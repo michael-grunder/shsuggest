@@ -98,6 +98,10 @@ final class Application
             return 0;
         }
 
+        if ($mode === 'config') {
+            return $this->runConfigCommand($args);
+        }
+
         if ($dryRun && $mode !== 'suggest') {
             throw new \RuntimeException('--dry-run can only be used when requesting suggestions.');
         }
@@ -445,6 +449,7 @@ final class Application
         $dryRun = false;
         $timeout = null;
         $showConfig = false;
+        $configMode = false;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -461,6 +466,7 @@ final class Application
         $dryRun = (bool) $input->getOption('dry-run');
         $version = (bool) $input->getOption('version');
         $showConfig = (bool) $input->getOption('show-config');
+        $configMode = (bool) $input->getOption('config');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
         $isExplain = (bool) $input->getOption('explain');
@@ -482,13 +488,40 @@ final class Application
         }
 
         $numOption = $input->getOption('num');
+        $numOptionName = null;
         if ($numOption !== null) {
-            $num = $this->parsePositiveIntOption((string) $numOption, $this->detectNumOptionName($input));
+            $numOptionName = $this->detectNumOptionName($input);
+            $num = $this->parsePositiveIntOption((string) $numOption, $numOptionName);
         }
 
         $timeoutOption = $input->getOption('timeout');
+        $timeoutOptionName = null;
         if ($timeoutOption !== null) {
-            $timeout = $this->parsePositiveIntOption((string) $timeoutOption, $this->detectTimeoutOptionName($input));
+            $timeoutOptionName = $this->detectTimeoutOptionName($input);
+            $timeout = $this->parsePositiveIntOption((string) $timeoutOption, $timeoutOptionName);
+        }
+
+        if ($configMode) {
+            $conflicts = $this->detectConfigConflicts(
+                json: $json,
+                shellIntegration: $shellIntegration,
+                dryRun: $dryRun,
+                widget: $hasWidgetOption,
+                explain: $isExplain,
+                showConfig: $showConfig,
+                help: $help,
+                version: $version,
+                numOptionName: $numOptionName,
+                timeoutOptionName: $timeoutOptionName
+            );
+            if ($conflicts !== []) {
+                throw new \RuntimeException(sprintf(
+                    '--config cannot be combined with %s.',
+                    implode(', ', $conflicts)
+                ));
+            }
+
+            $mode = 'config';
         }
 
         if ($mode === 'widget') {
@@ -533,6 +566,7 @@ final class Application
         $output->writeln('');
         $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
         $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
+        $output->writeln('Use --config set <key> <value> to edit the ~/.shsuggest file safely.');
     }
 
     private function printVersion(): void
@@ -664,6 +698,316 @@ final class Application
         return $num;
     }
 
+    /**
+     * @return string[]
+     */
+    private function detectConfigConflicts(
+        bool $json,
+        bool $shellIntegration,
+        bool $dryRun,
+        bool $widget,
+        bool $explain,
+        bool $showConfig,
+        bool $help,
+        bool $version,
+        ?string $numOptionName,
+        ?string $timeoutOptionName
+    ): array {
+        $conflicts = [];
+        if ($json) {
+            $conflicts[] = '--json';
+        }
+
+        if ($shellIntegration) {
+            $conflicts[] = '--shell';
+        }
+
+        if ($dryRun) {
+            $conflicts[] = '--dry-run';
+        }
+
+        if ($widget) {
+            $conflicts[] = '--widget';
+        }
+
+        if ($explain) {
+            $conflicts[] = '--explain';
+        }
+
+        if ($showConfig) {
+            $conflicts[] = '--show-config';
+        }
+
+        if ($help) {
+            $conflicts[] = '--help';
+        }
+
+        if ($version) {
+            $conflicts[] = '--version';
+        }
+
+        if ($numOptionName !== null) {
+            $conflicts[] = $numOptionName;
+        }
+
+        if ($timeoutOptionName !== null) {
+            $conflicts[] = $timeoutOptionName;
+        }
+
+        return $conflicts;
+    }
+
+    private function runConfigCommand(array $args): int
+    {
+        if ($args === []) {
+            throw new \RuntimeException('Please provide a config subcommand (e.g. "set").');
+        }
+
+        $command = strtolower((string) array_shift($args));
+        if ($command === 'set') {
+            return $this->handleConfigSet($args);
+        }
+
+        throw new \RuntimeException(sprintf('Unknown config subcommand "%s".', $command));
+    }
+
+    private function handleConfigSet(array $args): int
+    {
+        if (count($args) < 2) {
+            throw new \RuntimeException('Usage: shsuggest --config set <key> <value>');
+        }
+
+        $key = (string) array_shift($args);
+        $value = trim(implode(' ', $args));
+
+        if ($key === '') {
+            throw new \RuntimeException('Please provide the configuration key to set.');
+        }
+
+        $normalizedKey = $this->validateConfigKey($key);
+        $normalizedValue = $this->normalizeConfigValue($normalizedKey, $value);
+        $values = $this->configLoader->loadValues();
+        $path = $this->configLoader->getPath();
+        $changed = false;
+
+        if ($normalizedValue === null) {
+            if (array_key_exists($normalizedKey, $values)) {
+                unset($values[$normalizedKey]);
+                $changed = true;
+            }
+        } else {
+            $existing = $values[$normalizedKey] ?? null;
+            if (!$this->configValuesEqual($existing, $normalizedValue)) {
+                $values[$normalizedKey] = $normalizedValue;
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            $this->configLoader->saveValues($values);
+            if ($normalizedValue === null) {
+                $message = sprintf(
+                    '%s Reset "%s" to the default value in %s.',
+                    $this->style('✔', 'accent', STDOUT),
+                    $normalizedKey,
+                    $path
+                );
+            } else {
+                $message = sprintf(
+                    '%s Set "%s" to "%s" in %s.',
+                    $this->style('✔', 'accent', STDOUT),
+                    $normalizedKey,
+                    $this->describeConfigValue($normalizedValue),
+                    $path
+                );
+            }
+        } else {
+            if ($normalizedValue === null) {
+                $message = sprintf('"%s" already uses the default value.', $normalizedKey);
+            } else {
+                $message = sprintf(
+                    '"%s" is already set to "%s".',
+                    $normalizedKey,
+                    $this->describeConfigValue($normalizedValue)
+                );
+            }
+        }
+
+        $this->writeLine($message);
+
+        return 0;
+    }
+
+    private function validateConfigKey(string $key): string
+    {
+        $key = trim($key);
+        if ($key === '') {
+            throw new \RuntimeException('Empty configuration keys are not supported.');
+        }
+
+        foreach ($this->allowedConfigKeys() as $valid) {
+            if (strcasecmp($valid, $key) === 0) {
+                return $valid;
+            }
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Unknown configuration key "%s". Valid keys: %s',
+            $key,
+            implode(', ', $this->allowedConfigKeys())
+        ));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function allowedConfigKeys(): array
+    {
+        return array_keys(Config::defaults());
+    }
+
+    private function normalizeConfigValue(string $key, string $rawValue): string|int|float|null
+    {
+        $trimmed = trim($rawValue);
+        if ($trimmed === '') {
+            throw new \RuntimeException(sprintf('Please provide a value for "%s".', $key));
+        }
+
+        $lower = strtolower($trimmed);
+        if (in_array($lower, ['default', 'null', 'none'], true)) {
+            return null;
+        }
+
+        if ($key === 'num_thread' && $lower === 'auto') {
+            return null;
+        }
+
+        return match ($key) {
+            'num_suggestions', 'request_timeout', 'num_thread' => $this->parseConfigInt($trimmed, $key),
+            'temperature' => $this->parseTemperature($trimmed),
+            'ollama_endpoint' => $this->parseEndpoint($trimmed),
+            'pipe_first_into' => $this->parsePipeProgram($trimmed),
+            'model' => $this->validateModelChoice($trimmed),
+            default => $trimmed,
+        };
+    }
+
+    private function parseConfigInt(string $value, string $key): int
+    {
+        if (!ctype_digit($value)) {
+            throw new \RuntimeException(sprintf('"%s" expects a positive integer.', $key));
+        }
+
+        $int = (int) $value;
+        if ($int < 1) {
+            throw new \RuntimeException(sprintf('"%s" must be greater than zero.', $key));
+        }
+
+        return $int;
+    }
+
+    private function parseTemperature(string $value): float
+    {
+        if (!is_numeric($value)) {
+            throw new \RuntimeException('Temperature expects a numeric value.');
+        }
+
+        $float = (float) $value;
+        if ($float < 0 || $float > 2) {
+            throw new \RuntimeException('Temperature must be between 0 and 2.');
+        }
+
+        return $float;
+    }
+
+    private function parseEndpoint(string $value): string
+    {
+        $endpoint = filter_var($value, FILTER_VALIDATE_URL);
+        if ($endpoint === false) {
+            throw new \RuntimeException('Please provide a valid URL for "ollama_endpoint".');
+        }
+
+        $scheme = strtolower((string) parse_url($endpoint, PHP_URL_SCHEME));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            throw new \RuntimeException('ollama_endpoint must use http or https.');
+        }
+
+        return rtrim($endpoint, '/');
+    }
+
+    private function parsePipeProgram(string $value): string
+    {
+        $program = trim($value);
+        if ($program === '') {
+            throw new \RuntimeException('pipe_first_into cannot be empty.');
+        }
+
+        return $program;
+    }
+
+    private function validateModelChoice(string $model): string
+    {
+        try {
+            $available = $this->client->listAvailableModels();
+        } catch (OllamaClientException $exception) {
+            throw new \RuntimeException(
+                'Unable to query Ollama for installed models: ' . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
+
+        $needle = strtolower($model);
+        foreach ($available as $candidate) {
+            if (strcasecmp($candidate, $model) === 0) {
+                return $model;
+            }
+        }
+
+        foreach ($available as $candidate) {
+            $base = explode(':', $candidate)[0] ?? $candidate;
+            if (strcasecmp($base, $model) === 0) {
+                return $model;
+            }
+        }
+
+        $message = sprintf(
+            'Model "%s" is not installed. Available models: %s',
+            $model,
+            implode(', ', $available)
+        );
+
+        throw new \RuntimeException($message);
+    }
+
+    private function configValuesEqual(mixed $current, mixed $next): bool
+    {
+        if ($current === null || $next === null) {
+            return $current === $next;
+        }
+
+        if (is_float($current) && is_float($next)) {
+            return abs($current - $next) < 0.0000001;
+        }
+
+        return $current === $next;
+    }
+
+    private function describeConfigValue(string|int|float|null $value): string
+    {
+        if ($value === null) {
+            return 'default';
+        }
+
+        if (is_float($value)) {
+            $formatted = rtrim(rtrim(sprintf('%.10F', $value), '0'), '.');
+
+            return $formatted === '' ? '0' : $formatted;
+        }
+
+        return (string) $value;
+    }
+
     private function createInputDefinition(): InputDefinition
     {
         return new InputDefinition([
@@ -675,6 +1019,7 @@ final class Application
             new InputOption('help', 'h', InputOption::VALUE_NONE, 'Show this help message.'),
             new InputOption('version', 'V', InputOption::VALUE_NONE, 'Show application version.'),
             new InputOption('show-config', null, InputOption::VALUE_NONE, 'Display the parsed configuration file and exit.'),
+            new InputOption('config', null, InputOption::VALUE_NONE, 'Manage the configuration file (example: --config set <key> <value>).'),
             new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
             new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
