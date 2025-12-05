@@ -146,6 +146,7 @@ final class Application
             : $this->client->suggest($prompt, $requested);
         $generationDuration = microtime(true) - $generationStartedAt;
         $pipeProgram = $shellIntegration ? null : $this->config->getPipeProgram();
+        $model = $this->config->getModel();
 
         if ($asJson) {
             if ($pipeProgram !== null && $this->isTty(STDOUT)) {
@@ -154,7 +155,7 @@ final class Application
 
             $this->writeJson([
                 'mode' => 'suggest',
-                'model' => $this->config->getModel(),
+                'model' => $model,
                 'prompt' => $prompt,
                 'suggestions' => $this->suggestionsToArray($suggestions),
             ]);
@@ -172,7 +173,16 @@ final class Application
             fwrite(STDERR, $message . PHP_EOL);
         }
 
-        $choice = $shouldPrompt ? $this->interactiveChoice($suggestions) : $suggestions[0];
+        $modelDisplayHandled = false;
+        if ($shouldPrompt) {
+            $label = $this->buildSuggestionsLabel($model, $generationDuration);
+            $choice = $this->interactiveChoice($suggestions, $label);
+            if (trim($model) !== '') {
+                $modelDisplayHandled = true;
+            }
+        } else {
+            $choice = $suggestions[0];
+        }
 
         if ($shellIntegration) {
             $this->writeLine($choice->getCommand());
@@ -184,6 +194,11 @@ final class Application
             $this->safePipe($pipeProgram, $choice->getCommand());
         }
 
+        if (!$shouldPrompt && $requested === 1) {
+            $this->announceModelUsage($model, $generationDuration);
+            $modelDisplayHandled = true;
+        }
+
         $deferredDescription = $this->renderSelectedSuggestion($choice, $shouldPrompt);
 
         if (!$this->isTty(STDOUT)) {
@@ -193,7 +208,9 @@ final class Application
             }
         }
 
-        $this->announceModelUsage($this->config->getModel(), $generationDuration);
+        if (!$modelDisplayHandled) {
+            $this->announceModelUsage($model, $generationDuration);
+        }
 
         return 0;
     }
@@ -201,20 +218,35 @@ final class Application
     /**
      * @param Suggestion[] $suggestions
      */
-    private function interactiveChoice(array $suggestions): Suggestion
+    private function interactiveChoice(array $suggestions, string $label): Suggestion
     {
-        $choice = $this->selectInteractiveChoice($suggestions);
+        $choice = $this->selectInteractiveChoice($suggestions, $label);
         if ($choice !== null) {
             return $choice;
         }
 
-        return $this->legacyInteractiveChoice($suggestions);
+        return $this->legacyInteractiveChoice($suggestions, $label);
+    }
+
+    private function buildSuggestionsLabel(string $model, ?float $elapsedSeconds): string
+    {
+        $trimmedModel = trim($model);
+        if ($trimmedModel === '') {
+            return '✨ Suggestions';
+        }
+
+        $label = sprintf('✨ %s Suggestions', $trimmedModel);
+        $formattedTime = $this->formatElapsedSeconds($elapsedSeconds);
+
+        return $formattedTime === null
+            ? $label
+            : sprintf('%s (%s)', $label, $formattedTime);
     }
 
     /**
      * @param Suggestion[] $suggestions
      */
-    private function selectInteractiveChoice(array $suggestions): ?Suggestion
+    private function selectInteractiveChoice(array $suggestions, string $label): ?Suggestion
     {
         try {
             $options = [];
@@ -223,7 +255,7 @@ final class Application
             }
 
             $selection = select(
-                label: '✨ Suggestions',
+                label: $label,
                 options: $options,
                 default: $options[0] ?? null,
                 scroll: min(10, max(5, count($options))),
@@ -270,9 +302,9 @@ final class Application
     /**
      * @param Suggestion[] $suggestions
      */
-    private function legacyInteractiveChoice(array $suggestions): Suggestion
+    private function legacyInteractiveChoice(array $suggestions, string $label): Suggestion
     {
-        fwrite(STDERR, PHP_EOL . $this->style('✨ Suggestions', 'title', STDERR) . PHP_EOL . PHP_EOL);
+        fwrite(STDERR, PHP_EOL . $this->style($label, 'title', STDERR) . PHP_EOL . PHP_EOL);
 
         foreach ($suggestions as $index => $suggestion) {
             $num = $index + 1;
@@ -680,13 +712,22 @@ final class Application
             $this->style($model, 'command', STDERR),
         ];
 
-        if ($elapsedSeconds !== null) {
-            $formatted = sprintf('(%.2fs)', max($elapsedSeconds, 0));
-            $parts[] = $this->style($formatted, 'muted', STDERR);
+        $formatted = $this->formatElapsedSeconds($elapsedSeconds);
+        if ($formatted !== null) {
+            $parts[] = $this->style(sprintf('(%s)', $formatted), 'muted', STDERR);
         }
 
         $line = implode(' ', $parts);
         fwrite(STDERR, $line . PHP_EOL);
+    }
+
+    private function formatElapsedSeconds(?float $elapsedSeconds): ?string
+    {
+        if ($elapsedSeconds === null) {
+            return null;
+        }
+
+        return sprintf('%.2fs', max($elapsedSeconds, 0));
     }
 
     private function echoCommandToStderr(string $command): void
