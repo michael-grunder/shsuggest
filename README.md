@@ -27,6 +27,7 @@ shsuggest -e|--explain [COMMAND]
 * A single command is printed by default so it can be piped into other tooling. Pass `-n 3` (or any value > 1) from a TTY to browse suggestions interactively.
 * Use `--json` (or `-j`) to emit machine-readable output; interactive prompts are skipped automatically in this mode.
 * Use `--shell` when invoking from shell widgets/integration so only the selected suggestion is written to STDOUT.
+* Use `--dry-run` to instantly emit dummy suggestions without contacting Ollama—handy when testing UI flows.
 * When STDOUT is not a TTY, the selected command is also echoed to STDERR so you can still see/copy it while piping.
 
 Examples:

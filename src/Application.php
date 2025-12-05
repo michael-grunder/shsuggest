@@ -69,6 +69,7 @@ final class Application
         $args = $options['args'];
         $asJson = $options['json'];
         $shellIntegration = $options['shell'];
+        $dryRun = $options['dry-run'];
 
         if ($version) {
             $this->printVersion();
@@ -80,6 +81,10 @@ final class Application
             $this->printHelp();
 
             return 0;
+        }
+
+        if ($dryRun && $mode !== 'suggest') {
+            throw new \RuntimeException('--dry-run can only be used when requesting suggestions.');
         }
 
         if ($mode === 'widget') {
@@ -130,7 +135,9 @@ final class Application
         $requested = $shellIntegration
             ? 1
             : max(1, $options['num'] ?? $this->config->getNumSuggestions());
-        $suggestions = $this->client->suggest($prompt, $requested);
+        $suggestions = $dryRun
+            ? $this->generateDryRunSuggestions($prompt, $requested)
+            : $this->client->suggest($prompt, $requested);
         $pipeProgram = $shellIntegration ? null : $this->config->getPipeProgram();
 
         if ($asJson) {
@@ -140,6 +147,7 @@ final class Application
 
             $this->writeJson([
                 'mode' => 'suggest',
+                'model' => $this->config->getModel(),
                 'prompt' => $prompt,
                 'suggestions' => $this->suggestionsToArray($suggestions),
             ]);
@@ -177,6 +185,8 @@ final class Application
                 $this->writeDescription($deferredDescription);
             }
         }
+
+        $this->announceModelUsage($this->config->getModel());
 
         return 0;
     }
@@ -325,12 +335,45 @@ final class Application
     }
 
     /**
+     * @return Suggestion[]
+     */
+    private function generateDryRunSuggestions(string $prompt, int $count): array
+    {
+        $summary = $this->summarizePromptForDryRun($prompt);
+        $count = max(1, $count);
+        $suggestions = [];
+
+        for ($i = 1; $i <= $count; $i++) {
+            $command = sprintf('echo %s', escapeshellarg(sprintf('[dry-run] #%d %s', $i, $summary)));
+            $description = sprintf('Dummy suggestion %d for "%s".', $i, $summary);
+            $suggestions[] = new Suggestion($command, $description);
+        }
+
+        return $suggestions;
+    }
+
+    private function summarizePromptForDryRun(string $prompt): string
+    {
+        $prompt = trim((string) preg_replace('/\s+/', ' ', $prompt));
+        if ($prompt === '') {
+            return 'shell task';
+        }
+
+        if (strlen($prompt) > 60) {
+            $prompt = rtrim(substr($prompt, 0, 57)) . '...';
+        }
+
+        return $prompt;
+    }
+
+    /**
      * @return array{
      *     mode: string,
      *     help: bool,
      *     json: bool,
      *     num: ?int,
      *     shell: bool,
+     *     dry-run: bool,
      *     widget_binding: ?string,
      *     widget_shell: ?string,
      *     args: array<int, string>
@@ -347,6 +390,7 @@ final class Application
         $shellIntegration = false;
         $widgetBinding = null;
         $widgetShell = null;
+        $dryRun = false;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -360,6 +404,7 @@ final class Application
         $help = (bool) $input->getOption('help');
         $json = (bool) $input->getOption('json');
         $shellIntegration = (bool) ($input->getOption('shell') || $input->getOption('shell-integration'));
+        $dryRun = (bool) $input->getOption('dry-run');
         $version = (bool) $input->getOption('version');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
@@ -398,6 +443,7 @@ final class Application
             'json' => $json,
             'num' => $num,
             'shell' => $shellIntegration,
+            'dry-run' => $dryRun,
             'widget_binding' => $widgetBinding,
             'widget_shell' => $widgetShell,
             'args' => array_values($remaining),
@@ -511,6 +557,7 @@ final class Application
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
             new InputOption('shell', null, InputOption::VALUE_NONE, 'Emit only the selected suggestion for shell integration widgets.'),
             new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
+            new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips Ollama requests).'),
             new InputOption(
                 'widget',
                 null,
@@ -589,6 +636,17 @@ final class Application
             ' %s %s',
             $this->style('↳', 'muted', STDERR),
             $this->style($description, 'muted', STDERR)
+        );
+        fwrite(STDERR, $line . PHP_EOL);
+    }
+
+    private function announceModelUsage(string $model): void
+    {
+        $line = sprintf(
+            '%s %s %s',
+            $this->style('🤖', 'accent', STDERR),
+            $this->style('Model:', 'muted', STDERR),
+            $this->style($model, 'command', STDERR)
         );
         fwrite(STDERR, $line . PHP_EOL);
     }
