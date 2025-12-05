@@ -81,25 +81,88 @@ final class ConfigLoader
         return $this->path;
     }
 
+    public function saveValue(string $key, string|float|int|null $value): void
+    {
+        $lines = $this->readConfigLines();
+        $lineIndex = $this->findConfigLineIndex($lines, $key);
+
+        if ($value === null) {
+            if ($lineIndex === null) {
+                return;
+            }
+
+            unset($lines[$lineIndex]);
+            $this->writeConfigLines($lines);
+
+            return;
+        }
+
+        $newLine = sprintf('%s=%s', $key, $this->stringifyValue($value));
+        if ($lineIndex === null) {
+            $lines[] = $newLine;
+        } else {
+            $lines[$lineIndex] = $newLine;
+        }
+
+        $this->writeConfigLines($lines);
+    }
+
     /**
-     * @param array<string, string|float|int|null> $values
+     * @return string[]
      */
-    public function saveValues(array $values): void
+    private function readConfigLines(): array
+    {
+        if (!is_file($this->path)) {
+            return [];
+        }
+
+        if (!is_readable($this->path)) {
+            throw new RuntimeException(sprintf('Failed to read configuration file at %s.', $this->path));
+        }
+
+        $lines = @file($this->path, FILE_IGNORE_NEW_LINES);
+        if ($lines === false) {
+            throw new RuntimeException(sprintf('Failed to read configuration file at %s.', $this->path));
+        }
+
+        return $lines;
+    }
+
+    /**
+     * @param string[] $lines
+     */
+    private function findConfigLineIndex(array $lines, string $key): ?int
+    {
+        foreach ($lines as $index => $line) {
+            $trimmed = trim($line);
+            if ($trimmed === '' || $trimmed[0] === '#' || $trimmed[0] === ';') {
+                continue;
+            }
+
+            $equalPos = strpos($trimmed, '=');
+            if ($equalPos === false) {
+                continue;
+            }
+
+            $lineKey = trim(substr($trimmed, 0, $equalPos));
+            if (strcasecmp($lineKey, $key) === 0) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param string[] $lines
+     */
+    private function writeConfigLines(array $lines): void
     {
         $directory = dirname($this->path);
         if (!is_dir($directory)) {
             if (!@mkdir($directory, 0777, true) && !is_dir($directory)) {
                 throw new RuntimeException(sprintf('Failed to create configuration directory: %s', $directory));
             }
-        }
-
-        $lines = [];
-        foreach ($values as $key => $value) {
-            if ($value === null) {
-                continue;
-            }
-
-            $lines[] = sprintf('%s=%s', $key, $this->stringifyValue($value));
         }
 
         $contents = implode(PHP_EOL, $lines);

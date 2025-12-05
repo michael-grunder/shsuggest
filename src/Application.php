@@ -804,7 +804,7 @@ final class Application
         }
 
         if ($changed) {
-            $this->configLoader->saveValues($values);
+            $this->configLoader->saveValue($normalizedKey, $normalizedValue);
             if ($normalizedValue === null) {
                 $message = sprintf(
                     '%s Reset "%s" to the default value in %s.',
