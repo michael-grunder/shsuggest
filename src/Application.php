@@ -957,17 +957,37 @@ final class Application
             );
         }
 
-        $needle = strtolower($model);
+        $hasExplicitVersion = str_contains($model, ':');
+        $normalized = strtolower($model);
+
         foreach ($available as $candidate) {
             if (strcasecmp($candidate, $model) === 0) {
-                return $model;
+                return $candidate;
             }
         }
 
-        foreach ($available as $candidate) {
-            $base = explode(':', $candidate)[0] ?? $candidate;
-            if (strcasecmp($base, $model) === 0) {
-                return $model;
+        if (!$hasExplicitVersion) {
+            $baseMatches = array_values(array_filter(
+                $available,
+                static function (string $candidate) use ($normalized): bool {
+                    $base = strtolower(explode(':', $candidate, 2)[0]);
+
+                    return $base === $normalized;
+                }
+            ));
+
+            if (count($baseMatches) === 1) {
+                return $baseMatches[0];
+            }
+
+            if (count($baseMatches) > 1) {
+                $message = sprintf(
+                    'Ambiguous model selection for "%s": %s. Please specify the version (model:version).',
+                    $model,
+                    implode(', ', $baseMatches)
+                );
+
+                throw new \RuntimeException($message);
             }
         }
 
