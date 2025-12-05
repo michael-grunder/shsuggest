@@ -190,13 +190,13 @@ final class Application
             return 0;
         }
 
-        if ($pipeProgram !== null && $this->isTty(STDOUT)) {
-            $this->safePipe($pipeProgram, $choice->getCommand());
-        }
-
         if (!$shouldPrompt && $requested === 1) {
             $this->announceModelUsage($model, $generationDuration);
             $modelDisplayHandled = true;
+        }
+
+        if ($pipeProgram !== null && $this->isTty(STDOUT)) {
+            $this->safePipe($pipeProgram, $choice->getCommand());
         }
 
         $deferredDescription = $this->renderSelectedSuggestion($choice, $shouldPrompt);
