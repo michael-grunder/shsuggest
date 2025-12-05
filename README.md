@@ -28,6 +28,7 @@ shsuggest -e|--explain [COMMAND]
 * Use `--json` (or `-j`) to emit machine-readable output; interactive prompts are skipped automatically in this mode.
 * Use `--shell` when invoking from shell widgets/integration so only the selected suggestion is written to STDOUT.
 * Use `--dry-run` to instantly emit dummy suggestions without contacting Ollama—handy when testing UI flows.
+* Use `-t 60` (or `--timeout=60`) to override the Ollama request timeout for a single run.
 * When STDOUT is not a TTY, the selected command is also echoed to STDERR so you can still see/copy it while piping.
 
 Examples:
@@ -88,3 +89,6 @@ first suggestion is piped.
 
 `num_thread` is forwarded to Ollama's `options.num_thread` field, which can be used when targeting models that
 benefit from a specific thread count.
+
+`request_timeout` (or the `-t/--timeout` CLI option) controls how long `shsuggest` waits for Ollama to respond before
+failing the request. Increase it when running slower models or reduce it if you'd like to fail fast.

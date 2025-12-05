@@ -70,6 +70,11 @@ final class Application
         $asJson = $options['json'];
         $shellIntegration = $options['shell'];
         $dryRun = $options['dry-run'];
+        $timeoutOverride = $options['timeout'];
+
+        if ($timeoutOverride !== null) {
+            $this->client = $this->client->withTimeout($timeoutOverride);
+        }
 
         if ($version) {
             $this->printVersion();
@@ -393,6 +398,7 @@ final class Application
         $widgetBinding = null;
         $widgetShell = null;
         $dryRun = false;
+        $timeout = null;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -433,6 +439,11 @@ final class Application
             $num = $this->parsePositiveIntOption((string) $numOption, $this->detectNumOptionName($input));
         }
 
+        $timeoutOption = $input->getOption('timeout');
+        if ($timeoutOption !== null) {
+            $timeout = $this->parsePositiveIntOption((string) $timeoutOption, $this->detectTimeoutOptionName($input));
+        }
+
         if ($mode === 'widget') {
             $widgetShell = $remaining[0] ?? null;
             $remaining = array_slice($remaining, 1);
@@ -448,6 +459,7 @@ final class Application
             'dry-run' => $dryRun,
             'widget_binding' => $widgetBinding,
             'widget_shell' => $widgetShell,
+            'timeout' => $timeout,
             'args' => array_values($remaining),
         ];
     }
@@ -557,6 +569,7 @@ final class Application
             new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
             new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
+            new InputOption('timeout', 't', InputOption::VALUE_REQUIRED, 'Override the Ollama request timeout (seconds).'),
             new InputOption('shell', null, InputOption::VALUE_NONE, 'Emit only the selected suggestion for shell integration widgets.'),
             new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
             new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips Ollama requests).'),
@@ -583,6 +596,23 @@ final class Application
 
             if (str_starts_with($token, '-n')) {
                 $option = '-n';
+            }
+        }
+
+        return $option;
+    }
+
+    private function detectTimeoutOptionName(ArgvInput $input): string
+    {
+        $option = '--timeout';
+        foreach ($input->getRawTokens() as $token) {
+            if (str_starts_with($token, '--timeout')) {
+                $option = '--timeout';
+                continue;
+            }
+
+            if (str_starts_with($token, '-t')) {
+                $option = '-t';
             }
         }
 

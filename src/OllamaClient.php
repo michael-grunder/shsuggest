@@ -73,6 +73,19 @@ final class OllamaClient
         return trim((string) $decoded['explanation']);
     }
 
+    public function withTimeout(int $timeout): self
+    {
+        $timeout = max(1, $timeout);
+
+        return new self(
+            $this->endpoint,
+            $this->model,
+            $this->temperature,
+            $timeout,
+            $this->numThreads
+        );
+    }
+
     private function buildSuggestionPrompt(string $prompt, int $count): string
     {
         $count = max(1, $count);
