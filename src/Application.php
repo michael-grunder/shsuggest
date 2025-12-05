@@ -135,9 +135,11 @@ final class Application
         $requested = $shellIntegration
             ? 1
             : max(1, $options['num'] ?? $this->config->getNumSuggestions());
+        $generationStartedAt = microtime(true);
         $suggestions = $dryRun
             ? $this->generateDryRunSuggestions($prompt, $requested)
             : $this->client->suggest($prompt, $requested);
+        $generationDuration = microtime(true) - $generationStartedAt;
         $pipeProgram = $shellIntegration ? null : $this->config->getPipeProgram();
 
         if ($asJson) {
@@ -186,7 +188,7 @@ final class Application
             }
         }
 
-        $this->announceModelUsage($this->config->getModel());
+        $this->announceModelUsage($this->config->getModel(), $generationDuration);
 
         return 0;
     }
@@ -640,14 +642,20 @@ final class Application
         fwrite(STDERR, $line . PHP_EOL);
     }
 
-    private function announceModelUsage(string $model): void
+    private function announceModelUsage(string $model, ?float $elapsedSeconds = null): void
     {
-        $line = sprintf(
-            '%s %s %s',
+        $parts = [
             $this->style('🤖', 'accent', STDERR),
             $this->style('Model:', 'muted', STDERR),
-            $this->style($model, 'command', STDERR)
-        );
+            $this->style($model, 'command', STDERR),
+        ];
+
+        if ($elapsedSeconds !== null) {
+            $formatted = sprintf('(%.2fs)', max($elapsedSeconds, 0));
+            $parts[] = $this->style($formatted, 'muted', STDERR);
+        }
+
+        $line = implode(' ', $parts);
         fwrite(STDERR, $line . PHP_EOL);
     }
 

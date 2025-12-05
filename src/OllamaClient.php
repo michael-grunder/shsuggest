@@ -78,7 +78,7 @@ final class OllamaClient
         $count = max(1, $count);
 
         return <<<PROMPT
-You generate shell commands for experienced terminal users. 
+You generate shell commands for experienced terminal users.
 Respond ONLY with valid JSON that matches this schema:
 {
   "suggestions": [
@@ -88,7 +88,7 @@ Respond ONLY with valid JSON that matches this schema:
     }
   ]
 }
-Create {$count} suggestions that satisfy the schema. 
+Create {$count} suggestions that satisfy the schema.
 Keep commands concise, safe, and deterministic when possible.
 Human prompt:
 """{$prompt}"""
