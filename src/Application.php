@@ -145,6 +145,9 @@ final class Application
             ? $this->generateDryRunSuggestions($prompt, $requested)
             : $this->client->suggest($prompt, $requested);
         $generationDuration = microtime(true) - $generationStartedAt;
+        $tokensPerSecond = $dryRun
+            ? null
+            : $this->client->getLastTokensPerSecond($generationDuration);
         $pipeProgram = $shellIntegration ? null : $this->config->getPipeProgram();
         $model = $this->config->getModel();
 
@@ -175,7 +178,7 @@ final class Application
 
         $modelDisplayHandled = false;
         if ($shouldPrompt) {
-            $label = $this->buildSuggestionsLabel($model, $generationDuration);
+            $label = $this->buildSuggestionsLabel($model, $generationDuration, $tokensPerSecond);
             $choice = $this->interactiveChoice($suggestions, $label);
             if (trim($model) !== '') {
                 $modelDisplayHandled = true;
@@ -191,7 +194,7 @@ final class Application
         }
 
         if (!$shouldPrompt && $requested === 1) {
-            $this->announceModelUsage($model, $generationDuration);
+            $this->announceModelUsage($model, $generationDuration, $tokensPerSecond);
             $modelDisplayHandled = true;
         }
 
@@ -209,7 +212,7 @@ final class Application
         }
 
         if (!$modelDisplayHandled) {
-            $this->announceModelUsage($model, $generationDuration);
+            $this->announceModelUsage($model, $generationDuration, $tokensPerSecond);
         }
 
         return 0;
@@ -228,7 +231,7 @@ final class Application
         return $this->legacyInteractiveChoice($suggestions, $label);
     }
 
-    private function buildSuggestionsLabel(string $model, ?float $elapsedSeconds): string
+    private function buildSuggestionsLabel(string $model, ?float $elapsedSeconds, ?float $tokensPerSecond): string
     {
         $trimmedModel = trim($model);
         if ($trimmedModel === '') {
@@ -236,7 +239,7 @@ final class Application
         }
 
         $label = sprintf('✨ %s Suggestions', $trimmedModel);
-        $formattedTime = $this->formatElapsedSeconds($elapsedSeconds);
+        $formattedTime = $this->formatGenerationStats($elapsedSeconds, $tokensPerSecond);
 
         return $formattedTime === null
             ? $label
@@ -704,7 +707,11 @@ final class Application
         fwrite(STDERR, $line . PHP_EOL);
     }
 
-    private function announceModelUsage(string $model, ?float $elapsedSeconds = null): void
+    private function announceModelUsage(
+        string $model,
+        ?float $elapsedSeconds = null,
+        ?float $tokensPerSecond = null
+    ): void
     {
         $parts = [
             $this->style('🤖', 'accent', STDERR),
@@ -712,7 +719,7 @@ final class Application
             $this->style($model, 'command', STDERR),
         ];
 
-        $formatted = $this->formatElapsedSeconds($elapsedSeconds);
+        $formatted = $this->formatGenerationStats($elapsedSeconds, $tokensPerSecond);
         if ($formatted !== null) {
             $parts[] = $this->style(sprintf('(%s)', $formatted), 'muted', STDERR);
         }
@@ -728,6 +735,38 @@ final class Application
         }
 
         return sprintf('%.2fs', max($elapsedSeconds, 0));
+    }
+
+    private function formatGenerationStats(?float $elapsedSeconds, ?float $tokensPerSecond): ?string
+    {
+        $parts = [];
+
+        $formattedTime = $this->formatElapsedSeconds($elapsedSeconds);
+        if ($formattedTime !== null) {
+            $parts[] = $formattedTime;
+        }
+
+        $formattedTokens = $this->formatTokensPerSecond($tokensPerSecond);
+        if ($formattedTokens !== null) {
+            $parts[] = $formattedTokens;
+        }
+
+        if ($parts === []) {
+            return null;
+        }
+
+        return implode(' · ', $parts);
+    }
+
+    private function formatTokensPerSecond(?float $tokensPerSecond): ?string
+    {
+        if ($tokensPerSecond === null || $tokensPerSecond <= 0) {
+            return null;
+        }
+
+        return $tokensPerSecond >= 100
+            ? sprintf('%.0f tok/s', $tokensPerSecond)
+            : sprintf('%.1f tok/s', $tokensPerSecond);
     }
 
     private function echoCommandToStderr(string $command): void

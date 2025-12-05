@@ -8,6 +8,11 @@ use RuntimeException;
 
 final class OllamaClient
 {
+    /**
+     * @var array{eval_count:?int,eval_duration:?float,total_duration:?float}|null
+     */
+    private ?array $lastMetrics = null;
+
     public function __construct(
         private string $endpoint,
         private string $model,
@@ -137,6 +142,7 @@ PROMPT;
         }
 
         $response = $this->post('/api/generate', $payload);
+        $this->recordMetrics($response);
 
         if (!isset($response['response'])) {
             if (isset($response['error'])) {
@@ -217,8 +223,8 @@ PROMPT;
     private function decodeJson(string $raw, string $expectedKey): array
     {
         foreach ($this->candidateJsonStrings($raw) as $candidate) {
-            $decoded = json_decode($candidate, true);
-            if (is_array($decoded)) {
+            $decoded = $this->attemptJsonDecode($candidate);
+            if ($decoded !== null) {
                 return $decoded;
             }
         }
@@ -228,6 +234,33 @@ PROMPT;
             $expectedKey,
             $raw
         ));
+    }
+
+    public function getLastTokensPerSecond(?float $fallbackDuration = null): ?float
+    {
+        if ($this->lastMetrics === null) {
+            return null;
+        }
+
+        $tokens = $this->lastMetrics['eval_count'] ?? null;
+        if (!is_int($tokens) || $tokens <= 0) {
+            return null;
+        }
+
+        $duration = $this->lastMetrics['eval_duration'] ?? null;
+        if (!is_float($duration) || $duration <= 0) {
+            $duration = $this->lastMetrics['total_duration'] ?? null;
+        }
+
+        if ((!is_float($duration) || $duration <= 0) && $fallbackDuration !== null && $fallbackDuration > 0) {
+            $duration = $fallbackDuration;
+        }
+
+        if (!is_float($duration) || $duration <= 0) {
+            return null;
+        }
+
+        return $tokens / $duration;
     }
 
     /**
@@ -258,5 +291,71 @@ PROMPT;
         })));
 
         return $candidates === [] ? [$raw] : $candidates;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function attemptJsonDecode(string $candidate): ?array
+    {
+        $decoded = json_decode($candidate, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $repaired = $this->repairJson($candidate);
+        if ($repaired !== $candidate) {
+            $decoded = json_decode($repaired, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    private function repairJson(string $json): string
+    {
+        $pattern = '/("(?:\\\\.|[^"\\\\])*")(\s*)(?="(?:\\\\.|[^"\\\\])*"\s*:)/';
+        $repaired = preg_replace($pattern, '$1,$2', $json);
+
+        return $repaired ?? $json;
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    private function recordMetrics(array $response): void
+    {
+        if ($response === []) {
+            $this->lastMetrics = null;
+
+            return;
+        }
+
+        $this->lastMetrics = [
+            'eval_count' => isset($response['eval_count']) ? (int) $response['eval_count'] : null,
+            'eval_duration' => $this->normalizeDuration($response['eval_duration'] ?? null),
+            'total_duration' => $this->normalizeDuration($response['total_duration'] ?? null),
+        ];
+    }
+
+    private function normalizeDuration(mixed $value): ?float
+    {
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        $seconds = (float) $value;
+        if ($seconds <= 0) {
+            return null;
+        }
+
+        // Ollama reports durations in nanoseconds, so divide to convert seconds when the value looks large.
+        if ($seconds > 1000000) {
+            $seconds /= 1000000000;
+        }
+
+        return $seconds;
     }
 }
