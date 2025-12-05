@@ -24,8 +24,16 @@ final class ConfigLoader
 
     public function load(): Config
     {
+        return new Config($this->loadValues());
+    }
+
+    /**
+     * @return array<string, string|float|int|null>
+     */
+    public function loadValues(): array
+    {
         if (!is_readable($this->path)) {
-            return new Config(Config::defaults());
+            return [];
         }
 
         $lines = file($this->path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
@@ -51,7 +59,7 @@ final class ConfigLoader
 
         $values = $this->validateOptions($values);
 
-        return new Config($values);
+        return $values;
     }
 
     private function normalizeValue(string $value): string|float|int|null

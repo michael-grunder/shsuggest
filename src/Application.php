@@ -38,11 +38,14 @@ final class Application
     private PipeRunner $pipeRunner;
     private OutputFormatter $stdoutFormatter;
     private OutputFormatter $stderrFormatter;
+    private ConfigLoader $configLoader;
 
     public function __construct(
         private Config $config,
-        private OllamaClient $client
+        private OllamaClient $client,
+        ?ConfigLoader $configLoader = null
     ) {
+        $this->configLoader = $configLoader ?? new ConfigLoader();
         $this->pipeRunner = new PipeRunner();
         $this->stdoutFormatter = $this->createFormatter($this->isTty(STDOUT));
         $this->stderrFormatter = $this->createFormatter($this->isTty(STDERR));
@@ -68,6 +71,7 @@ final class Application
         $version = $options['version'];
         $args = $options['args'];
         $asJson = $options['json'];
+        $showConfig = $options['show_config'];
         $shellIntegration = $options['shell'];
         $dryRun = $options['dry-run'];
         $timeoutOverride = $options['timeout'];
@@ -84,6 +88,12 @@ final class Application
 
         if ($help) {
             $this->printHelp();
+
+            return 0;
+        }
+
+        if ($showConfig) {
+            $this->printConfigSettings();
 
             return 0;
         }
@@ -434,6 +444,7 @@ final class Application
         $widgetShell = null;
         $dryRun = false;
         $timeout = null;
+        $showConfig = false;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -449,6 +460,7 @@ final class Application
         $shellIntegration = (bool) ($input->getOption('shell') || $input->getOption('shell-integration'));
         $dryRun = (bool) $input->getOption('dry-run');
         $version = (bool) $input->getOption('version');
+        $showConfig = (bool) $input->getOption('show-config');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
         $isExplain = (bool) $input->getOption('explain');
@@ -495,6 +507,7 @@ final class Application
             'widget_binding' => $widgetBinding,
             'widget_shell' => $widgetShell,
             'timeout' => $timeout,
+            'show_config' => $showConfig,
             'args' => array_values($remaining),
         ];
     }
@@ -525,6 +538,66 @@ final class Application
     private function printVersion(): void
     {
         $this->writeLine(sprintf('shsuggest %s', Version::CURRENT));
+    }
+
+    private function printConfigSettings(): void
+    {
+        $path = $this->configLoader->getPath();
+        $values = $this->configLoader->loadValues();
+        $readable = is_readable($path);
+
+        $this->writeLine($this->style('⚙ Configuration', 'title', STDOUT));
+        $this->writeLine(
+            sprintf(
+                ' %s %s',
+                $this->style('Path:', 'muted', STDOUT),
+                $this->style($path, 'command', STDOUT)
+            )
+        );
+        $this->writeLine('');
+
+        if (!$readable) {
+            $message = sprintf(
+                '%s No readable configuration file was found; defaults are active.',
+                $this->style('ℹ', 'accent', STDOUT)
+            );
+            $this->writeLine($message);
+
+            return;
+        }
+
+        if ($values === []) {
+            $message = sprintf(
+                '%s No settings were parsed from the configuration file.',
+                $this->style('ℹ', 'accent', STDOUT)
+            );
+            $this->writeLine($message);
+
+            return;
+        }
+
+        foreach ($values as $key => $value) {
+            $line = sprintf(
+                ' %s %s %s',
+                $this->style('•', 'muted', STDOUT),
+                $this->style((string) $key, 'accent', STDOUT),
+                $this->style($this->formatConfigValue($value), 'command', STDOUT)
+            );
+            $this->writeLine($line);
+        }
+    }
+
+    private function formatConfigValue(string|float|int|null $value): string
+    {
+        if ($value === null) {
+            return 'null';
+        }
+
+        if (is_string($value)) {
+            return $value === '' ? '""' : $value;
+        }
+
+        return (string) $value;
     }
 
     private function isInteractive(): bool
@@ -601,6 +674,7 @@ final class Application
             ),
             new InputOption('help', 'h', InputOption::VALUE_NONE, 'Show this help message.'),
             new InputOption('version', 'V', InputOption::VALUE_NONE, 'Show application version.'),
+            new InputOption('show-config', null, InputOption::VALUE_NONE, 'Display the parsed configuration file and exit.'),
             new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
             new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),

@@ -19,5 +19,5 @@ $client = new OllamaClient(
     $config->getNumThread()
 );
 
-$app = new Application($config, $client);
+$app = new Application($config, $client, $loader);
 exit($app->run($argv));
