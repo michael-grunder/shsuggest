@@ -69,16 +69,16 @@ Re-run the command whenever you update the binary so the hook stays in sync.
 
 ## Configuration
 
-`shsuggest` looks for a simple `key=value` dotfile at `~/.shsuggest`. All settings are optional:
+`shsuggest` looks for a simple TOML dotfile at `~/.shsuggest`. All settings are optional:
 
-```ini
-model=llama3
-ollama_endpoint=http://127.0.0.1:11434
-num_suggestions=1
-temperature=0.35
-num_thread=32
-request_timeout=30
-pipe_first_into=pbcopy
+```toml
+model = "llama3"
+ollama_endpoint = "http://127.0.0.1:11434"
+num_suggestions = 1
+temperature = 0.35
+num_thread = 32
+request_timeout = 30
+pipe_first_into = "pbcopy"
 ```
 
 `num_suggestions` controls the default value passed to `-n/--num` when it isn't provided explicitly.
@@ -99,4 +99,5 @@ Run `shsuggest --show-config` at any time to confirm which settings were parsed 
 To edit the file from the CLI, use `shsuggest --config set <key> <value>`. Values are validated before being
 written—numeric fields reject invalid numbers and the `model` entry is checked against the models registered
 with your local Ollama instance. Pass `default`, `none`, or `null` as the value to remove an override and fall
-back to the built-in defaults.
+back to the built-in defaults. Older `key=value` files are still recognized, and the next call to
+`shsuggest --config set …` will convert them to TOML automatically.
