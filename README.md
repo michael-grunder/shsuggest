@@ -72,7 +72,6 @@ Re-run the command whenever you update the binary so the hook stays in sync.
 `shsuggest` looks for a simple TOML dotfile at `~/.shsuggest`. All settings are optional:
 
 ```toml
-model = "llama3"
 source = "ollama"
 num_suggestions = 1
 temperature = 0.35
@@ -81,6 +80,7 @@ request_timeout = 30
 pipe_first_into = "pbcopy"
 
 [ollama]
+model = "llama3"
 endpoint = "http://127.0.0.1:11434"
 # or split the endpoint into parts:
 host = "127.0.0.1"
@@ -94,8 +94,8 @@ base_url = "https://api.openai.com/v1"
 
 `source` selects which backend to use. Only `ollama` is implemented today, but the additional tables allow you
 to keep credentials for other adapters that may be added later. The `[ollama]` table accepts a full `endpoint`
-or separate host/port/scheme parts (the endpoint wins when both are provided). The legacy top-level
-`ollama_endpoint` key is still honored for backwards compatibility.
+or separate host/port/scheme parts (the endpoint wins when both are provided) as well as the `model` to query.
+The legacy top-level `ollama_endpoint` and `model` keys are still honored for backwards compatibility.
 
 `num_suggestions` controls the default value passed to `-n/--num` when it isn't provided explicitly.
 Invalid values are ignored (and reset to 1) with a warning.
@@ -114,7 +114,8 @@ fast.
 Run `shsuggest --show-config` at any time to confirm which settings were parsed from your dotfile.
 
 To edit the file from the CLI, use `shsuggest --config set <key> <value>`. Values are validated before being
-written—numeric fields reject invalid numbers and the `model` entry is checked against the models reported by
+written—numeric fields reject invalid numbers and the `ollama.model` entry is checked against the models reported by
 the active source. Pass `default`, `none`, or `null` as the value to remove an override and fall back to the
-built-in defaults. Older `key=value` files are still recognized, and the next call to `shsuggest --config set
-…` will convert them to TOML automatically.
+built-in defaults. The model key is addressed as `ollama.model`, though the legacy root-level `model` alias is still
+accepted. Older `key=value` files are still recognized, and the next call to `shsuggest --config set …` will convert
+them to TOML automatically.

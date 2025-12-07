@@ -33,6 +33,10 @@ final class Application
         'error' => ['red', null, ['bold']],
     ];
 
+    private const CONFIG_KEY_ALIASES = [
+        'model' => 'ollama.model',
+    ];
+
     private const DEFAULT_WIDGET_BINDING = '\C-g';
 
     private PipeRunner $pipeRunner;
@@ -855,8 +859,10 @@ final class Application
             throw new \RuntimeException('Empty configuration keys are not supported.');
         }
 
+        $canonical = $this->canonicalConfigKey($key);
+
         foreach ($this->allowedConfigKeys() as $valid) {
-            if (strcasecmp($valid, $key) === 0) {
+            if (strcasecmp($valid, $canonical) === 0) {
                 return $valid;
             }
         }
@@ -897,10 +903,21 @@ final class Application
             'temperature' => $this->parseTemperature($trimmed),
             'ollama_endpoint' => $this->parseEndpoint($trimmed),
             'pipe_first_into' => $this->parsePipeProgram($trimmed),
-            'model' => $this->validateModelChoice($trimmed),
+            'ollama.model' => $this->validateModelChoice($trimmed),
             'source' => $this->normalizeSourceName($trimmed),
             default => $trimmed,
         };
+    }
+
+    private function canonicalConfigKey(string $key): string
+    {
+        foreach (self::CONFIG_KEY_ALIASES as $alias => $canonical) {
+            if (strcasecmp($alias, $key) === 0) {
+                return $canonical;
+            }
+        }
+
+        return $key;
     }
 
     private function parseConfigInt(string $value, string $key): int

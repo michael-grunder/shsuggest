@@ -10,7 +10,6 @@ final class Config
     private const OLLAMA_DEFAULT_ENDPOINT = 'http://127.0.0.1:11434';
 
     private const TOP_LEVEL_DEFAULTS = [
-        'model' => 'gemma3',
         'num_suggestions' => 1,
         'temperature' => 0.3,
         'num_thread' => null,
@@ -21,6 +20,7 @@ final class Config
 
     private const SOURCE_DEFAULTS = [
         'ollama' => [
+            'model' => 'gemma3',
             'endpoint' => self::OLLAMA_DEFAULT_ENDPOINT,
             'scheme' => 'http',
             'host' => '127.0.0.1',
@@ -48,7 +48,23 @@ final class Config
 
     public function getModel(): string
     {
-        return (string) $this->values['model'];
+        $source = $this->getSource();
+        $settings = $this->getSourceSettings($source);
+        $model = $settings['model'] ?? null;
+
+        if (is_string($model) && trim($model) !== '') {
+            return $model;
+        }
+
+        $sourceDefaults = self::SOURCE_DEFAULTS[$source] ?? null;
+        if (is_array($sourceDefaults)) {
+            $default = $sourceDefaults['model'] ?? null;
+            if (is_string($default) && $default !== '') {
+                return $default;
+            }
+        }
+
+        return (string) (self::SOURCE_DEFAULTS[self::DEFAULT_SOURCE]['model'] ?? '');
     }
 
     public function getSource(): string
@@ -124,7 +140,10 @@ final class Config
     {
         return array_replace(
             self::TOP_LEVEL_DEFAULTS,
-            ['ollama_endpoint' => self::OLLAMA_DEFAULT_ENDPOINT]
+            [
+                'ollama_endpoint' => self::OLLAMA_DEFAULT_ENDPOINT,
+                'ollama.model' => self::SOURCE_DEFAULTS['ollama']['model'],
+            ]
         );
     }
 
@@ -135,9 +154,18 @@ final class Config
     {
         $topLevel = [];
         $sources = [];
+        $legacyModel = null;
 
         foreach ($values as $key => $value) {
             if (!is_string($key)) {
+                continue;
+            }
+
+            if ($key === 'model') {
+                if (is_string($value) && $value !== '') {
+                    $legacyModel = $value;
+                }
+
                 continue;
             }
 
@@ -157,6 +185,19 @@ final class Config
         $legacyEndpoint = $this->values['ollama_endpoint'] ?? null;
         if (is_string($legacyEndpoint) && $legacyEndpoint !== '') {
             $this->sourceSettings['ollama']['endpoint'] = rtrim($legacyEndpoint, '/');
+        }
+
+        if (is_string($legacyModel) && $legacyModel !== '') {
+            $source = strtolower((string) ($this->values['source'] ?? self::DEFAULT_SOURCE));
+            if ($source === '') {
+                $source = self::DEFAULT_SOURCE;
+            }
+
+            if (!isset($this->sourceSettings[$source])) {
+                $source = self::DEFAULT_SOURCE;
+            }
+
+            $this->sourceSettings[$source]['model'] = $legacyModel;
         }
     }
 

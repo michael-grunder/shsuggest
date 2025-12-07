@@ -49,11 +49,7 @@ final class ConfigLoader
     {
         $values = $this->parseConfigFile(failOnParseError: true);
 
-        if ($value === null) {
-            unset($values[$key]);
-        } else {
-            $values[$key] = $value;
-        }
+        $values = $this->storeValueByPath($values, $key, $value);
 
         $this->writeConfigValues($values);
     }
@@ -234,5 +230,61 @@ final class ConfigLoader
     private function isAssociativeArray(array $values): bool
     {
         return array_keys($values) !== range(0, count($values) - 1);
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private function storeValueByPath(array $values, string $key, string|float|int|null $value): array
+    {
+        $segments = explode('.', $key);
+        $segments = array_values(array_filter($segments, static fn ($segment) => $segment !== ''));
+
+        if ($segments === []) {
+            return $values;
+        }
+
+        $cursor = &$values;
+        while (count($segments) > 1) {
+            $segment = array_shift($segments);
+            if (!isset($cursor[$segment]) || !is_array($cursor[$segment])) {
+                $cursor[$segment] = [];
+            }
+
+            $cursor = &$cursor[$segment];
+        }
+
+        $finalKey = array_shift($segments);
+        if ($value === null) {
+            if (is_array($cursor) && array_key_exists($finalKey, $cursor)) {
+                unset($cursor[$finalKey]);
+            }
+
+            $this->pruneEmptyTables($values);
+        } else {
+            $cursor[$finalKey] = $value;
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private function pruneEmptyTables(array &$values): void
+    {
+        foreach ($values as $key => &$candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+
+            $this->pruneEmptyTables($candidate);
+            if ($candidate === []) {
+                unset($values[$key]);
+            }
+        }
+
+        unset($candidate);
     }
 }
