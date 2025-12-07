@@ -1023,7 +1023,9 @@ final class Application
     private function validateModelChoice(string $model): string
     {
         try {
-            $available = $this->client->listAvailableModels();
+            $factory = new SuggestionSourceFactory($this->config);
+            $source = $factory->create('ollama');
+            $available = $source->listAvailableModels();
         } catch (SuggestionSourceException $exception) {
             throw new \RuntimeException(
                 'Unable to query the configured source for installed models: ' . $exception->getMessage(),

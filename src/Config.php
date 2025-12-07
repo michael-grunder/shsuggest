@@ -26,6 +26,10 @@ final class Config
             'host' => '127.0.0.1',
             'port' => 11434,
         ],
+        'copilot' => [
+            'model' => 'copilot-cli',
+            'binary' => 'copilot',
+        ],
     ];
 
     /**
@@ -46,17 +50,17 @@ final class Config
         $this->initializeValues($values);
     }
 
-    public function getModel(): string
+    public function getModel(?string $source = null): string
     {
-        $source = $this->getSource();
-        $settings = $this->getSourceSettings($source);
+        $sourceName = $source ?? $this->getSource();
+        $settings = $this->getSourceSettings($sourceName);
         $model = $settings['model'] ?? null;
 
         if (is_string($model) && trim($model) !== '') {
             return $model;
         }
 
-        $sourceDefaults = self::SOURCE_DEFAULTS[$source] ?? null;
+        $sourceDefaults = self::SOURCE_DEFAULTS[$sourceName] ?? null;
         if (is_array($sourceDefaults)) {
             $default = $sourceDefaults['model'] ?? null;
             if (is_string($default) && $default !== '') {
@@ -143,6 +147,8 @@ final class Config
             [
                 'ollama_endpoint' => self::OLLAMA_DEFAULT_ENDPOINT,
                 'ollama.model' => self::SOURCE_DEFAULTS['ollama']['model'],
+                'copilot.model' => self::SOURCE_DEFAULTS['copilot']['model'],
+                'copilot.binary' => self::SOURCE_DEFAULTS['copilot']['binary'],
             ]
         );
     }
