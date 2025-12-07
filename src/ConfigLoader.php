@@ -13,8 +13,6 @@ final class ConfigLoader
 {
     private const DOTFILE = '.shsuggest';
 
-    private bool $legacyWarningEmitted = false;
-
     public function __construct(private ?string $path = null)
     {
         if ($this->path === null) {
@@ -37,7 +35,7 @@ final class ConfigLoader
      */
     public function loadValues(): array
     {
-        $values = $this->parseConfigFile(failOnParseError: false, allowLegacyFallback: true);
+        $values = $this->parseConfigFile(failOnParseError: false);
 
         $scalarsOnly = [];
         foreach ($values as $key => $value) {
@@ -51,20 +49,6 @@ final class ConfigLoader
         return $scalarsOnly;
     }
 
-    private function normalizeValue(string $value): string|float|int|null
-    {
-        if (is_numeric($value)) {
-            return str_contains($value, '.') ? (float) $value : (int) $value;
-        }
-
-        $lower = strtolower($value);
-        if (in_array($lower, ['null', 'none'], true)) {
-            return null;
-        }
-
-        return trim($value, "\"'");
-    }
-
     public function getPath(): string
     {
         return $this->path;
@@ -72,7 +56,7 @@ final class ConfigLoader
 
     public function saveValue(string $key, string|float|int|null $value): void
     {
-        $values = $this->parseConfigFile(failOnParseError: true, allowLegacyFallback: true);
+        $values = $this->parseConfigFile(failOnParseError: true);
 
         if ($value === null) {
             unset($values[$key]);
@@ -140,7 +124,7 @@ final class ConfigLoader
     /**
      * @return array<string, mixed>
      */
-    private function parseConfigFile(bool $failOnParseError, bool $allowLegacyFallback): array
+    private function parseConfigFile(bool $failOnParseError): array
     {
         if (!is_file($this->path)) {
             return [];
@@ -159,15 +143,6 @@ final class ConfigLoader
 
             return is_array($parsed) ? $parsed : [];
         } catch (ParseException $exception) {
-            if ($allowLegacyFallback) {
-                $legacy = $this->parseLegacyConfig();
-                if ($legacy !== null) {
-                    $this->warnLegacyFormat();
-
-                    return $legacy;
-                }
-            }
-
             if ($failOnParseError) {
                 $message = sprintf(
                     'Failed to parse configuration file at %s: %s',
@@ -182,68 +157,6 @@ final class ConfigLoader
 
             return [];
         }
-    }
-
-    /**
-     * @return array<string, string|float|int|null>|null
-     */
-    private function parseLegacyConfig(): ?array
-    {
-        $lines = @file($this->path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines === false) {
-            return null;
-        }
-
-        $values = [];
-        $legacyCandidates = 0;
-
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '' || $line[0] === '#' || $line[0] === ';') {
-                continue;
-            }
-
-            if (!str_contains($line, '=')) {
-                continue;
-            }
-
-            [$key, $value] = array_map('trim', explode('=', $line, 2));
-            if ($key === '') {
-                continue;
-            }
-
-            if ($this->looksLikeLegacyValue($value)) {
-                $legacyCandidates++;
-            }
-
-            $values[$key] = $this->normalizeValue($value);
-        }
-
-        return $legacyCandidates > 0 ? $values : null;
-    }
-
-    private function looksLikeLegacyValue(string $value): bool
-    {
-        $trimmed = trim($value);
-        if ($trimmed === '') {
-            return false;
-        }
-
-        $firstChar = $trimmed[0];
-        if ($firstChar === '"' || $firstChar === "'") {
-            return false;
-        }
-
-        if (is_numeric($trimmed)) {
-            return false;
-        }
-
-        $lower = strtolower($trimmed);
-        if (in_array($lower, ['true', 'false'], true)) {
-            return false;
-        }
-
-        return (bool) preg_match('/[a-zA-Z]/', $trimmed);
     }
 
     /**
@@ -290,18 +203,4 @@ final class ConfigLoader
         fwrite(STDERR, $message . PHP_EOL);
     }
 
-    private function warnLegacyFormat(): void
-    {
-        if ($this->legacyWarningEmitted) {
-            return;
-        }
-
-        $message = sprintf(
-            '⚠ Warning: Detected legacy ~/.shsuggest format at %s. It will be rewritten as TOML the next time a setting is saved.',
-            $this->path
-        );
-
-        fwrite(STDERR, $message . PHP_EOL);
-        $this->legacyWarningEmitted = true;
-    }
 }
