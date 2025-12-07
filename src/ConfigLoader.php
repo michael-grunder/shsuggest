@@ -12,6 +12,7 @@ use Yosymfony\Toml\TomlBuilder;
 final class ConfigLoader
 {
     private const DOTFILE = '.shsuggest';
+    private const DOTFILE_TOML = '.shsuggest.toml';
 
     public function __construct(private ?string $path = null)
     {
@@ -21,7 +22,20 @@ final class ConfigLoader
                 throw new RuntimeException('Unable to determine home directory for configuration file.');
             }
 
-            $this->path = rtrim($home, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . self::DOTFILE;
+            $home = rtrim($home, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+            $candidates = [
+                $home . self::DOTFILE,
+                $home . self::DOTFILE_TOML,
+            ];
+
+            foreach ($candidates as $candidate) {
+                if (file_exists($candidate)) {
+                    $this->path = $candidate;
+                    break;
+                }
+            }
+
+            $this->path ??= $candidates[0];
         }
     }
 

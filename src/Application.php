@@ -598,7 +598,7 @@ final class Application
         $output->writeln('');
         $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
         $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
-        $output->writeln('Use --config set <key> <value> to edit the ~/.shsuggest file safely.');
+        $output->writeln('Use --config set <key> <value> to edit the ~/.shsuggest(.toml) file safely.');
     }
 
     private function printVersion(): void

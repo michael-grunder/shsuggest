@@ -71,7 +71,7 @@ Re-run the command whenever you update the binary so the hook stays in sync.
 
 ## Configuration
 
-`shsuggest` looks for a simple TOML dotfile at `~/.shsuggest`. All settings are optional:
+`shsuggest` looks for a simple TOML dotfile at `~/.shsuggest` (or `~/.shsuggest.toml`). All settings are optional:
 
 ```toml
 source = "ollama"
