@@ -12,15 +12,18 @@ final class OllamaClient implements SuggestionSource
      * @var array{eval_count:?int,eval_duration:?float,total_duration:?float}|null
      */
     private ?array $lastMetrics = null;
+    private SystemContextProvider $systemContextProvider;
 
     public function __construct(
         private string $endpoint,
         private string $model,
         private float $temperature = 0.3,
         private int $timeout = 30,
-        private ?int $numThreads = null
+        private ?int $numThreads = null,
+        ?SystemContextProvider $systemContextProvider = null
     ) {
         $this->endpoint = rtrim($this->endpoint, '/');
+        $this->systemContextProvider = $systemContextProvider ?? new SystemContextProvider();
     }
 
     /**
@@ -28,12 +31,7 @@ final class OllamaClient implements SuggestionSource
      */
     public function suggest(string $prompt, int $count): array
     {
-        $prompt = trim($prompt);
-        if ($prompt === '') {
-            throw new RuntimeException('Cannot request suggestions for an empty prompt.');
-        }
-
-        $instruction = $this->buildSuggestionPrompt($prompt, $count);
+        $instruction = $this->renderSuggestionPrompt($prompt, $count);
         $response = $this->generate($instruction);
         $decoded = $this->decodeJson($response, 'suggestions');
 
@@ -62,12 +60,7 @@ final class OllamaClient implements SuggestionSource
 
     public function explain(string $command): string
     {
-        $command = trim($command);
-        if ($command === '') {
-            throw new RuntimeException('Cannot explain an empty command.');
-        }
-
-        $instruction = $this->buildExplainPrompt($command);
+        $instruction = $this->renderExplainPrompt($command);
         $response = $this->generate($instruction);
         $decoded = $this->decodeJson($response, 'explanation');
 
@@ -87,13 +80,39 @@ final class OllamaClient implements SuggestionSource
             $this->model,
             $this->temperature,
             $timeout,
-            $this->numThreads
+            $this->numThreads,
+            $this->systemContextProvider
         );
+    }
+
+    public function renderSuggestionPrompt(string $prompt, int $count): string
+    {
+        $prompt = trim($prompt);
+        if ($prompt === '') {
+            throw new RuntimeException('Cannot request suggestions for an empty prompt.');
+        }
+
+        return $this->buildSuggestionPrompt($prompt, $count);
+    }
+
+    public function renderExplainPrompt(string $command): string
+    {
+        $command = trim($command);
+        if ($command === '') {
+            throw new RuntimeException('Cannot explain an empty command.');
+        }
+
+        return $this->buildExplainPrompt($command);
     }
 
     private function buildSuggestionPrompt(string $prompt, int $count): string
     {
         $count = max(1, $count);
+        $contextBlock = '';
+        $systemContext = trim($this->systemContextProvider->describe());
+        if ($systemContext !== '') {
+            $contextBlock = "System context:\n{$systemContext}\n\n";
+        }
 
         return <<<PROMPT
 You generate shell commands for experienced terminal users.
@@ -108,7 +127,8 @@ Respond ONLY with valid JSON that matches this schema:
 }
 Create {$count} suggestions that satisfy the schema.
 Keep commands concise, safe, and deterministic when possible.
-Human prompt:
+Respect the system context, especially when commands differ across shells or operating systems.
+{$contextBlock}Human prompt:
 """{$prompt}"""
 PROMPT;
     }

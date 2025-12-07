@@ -29,6 +29,7 @@ shsuggest -e|--explain [COMMAND]
 * Use `--show-config` to print the settings parsed from `~/.shsuggest` and exit.
 * Use `--shell` when invoking from shell widgets/integration so only the selected suggestion is written to STDOUT.
 * Use `--dry-run` to instantly emit dummy suggestions without contacting the configured source—handy when testing UI flows.
+* Use `--dump-prompt` to print the raw model prompt (including system metadata) that would be sent, then exit.
 * Use `-t 60` (or `--timeout=60`) to override the model request timeout for a single run.
 * When STDOUT is not a TTY, the selected command is also echoed to STDERR so you can still see/copy it while piping.
 

@@ -79,6 +79,7 @@ final class Application
         $shellIntegration = $options['shell'];
         $dryRun = $options['dry-run'];
         $timeoutOverride = $options['timeout'];
+        $dumpPrompt = $options['dump_prompt'];
 
         if ($timeoutOverride !== null) {
             $this->client = $this->client->withTimeout($timeoutOverride);
@@ -100,6 +101,10 @@ final class Application
             $this->printConfigSettings();
 
             return 0;
+        }
+
+        if ($dumpPrompt && !in_array($mode, ['suggest', 'explain'], true)) {
+            throw new \RuntimeException('--dump-prompt can only be used when requesting suggestions or explanations.');
         }
 
         if ($mode === 'config') {
@@ -126,6 +131,13 @@ final class Application
             $command = $this->resolveInput($args, 'Enter the shell command to explain: ');
             if ($command === '') {
                 throw new \RuntimeException('No command provided to explain.');
+            }
+
+            if ($dumpPrompt) {
+                $promptBody = $this->client->renderExplainPrompt($command);
+                $this->writeLine($promptBody);
+
+                return 0;
             }
 
             $explanation = $this->client->explain($command);
@@ -158,6 +170,14 @@ final class Application
         $requested = $shellIntegration
             ? 1
             : max(1, $options['num'] ?? $this->config->getNumSuggestions());
+
+        if ($dumpPrompt) {
+            $promptBody = $this->client->renderSuggestionPrompt($prompt, $requested);
+            $this->writeLine($promptBody);
+
+            return 0;
+        }
+
         $generationStartedAt = microtime(true);
         $suggestions = $dryRun
             ? $this->generateDryRunSuggestions($prompt, $requested)
@@ -430,12 +450,16 @@ final class Application
      * @return array{
      *     mode: string,
      *     help: bool,
+     *     version: bool,
      *     json: bool,
      *     num: ?int,
      *     shell: bool,
      *     dry-run: bool,
      *     widget_binding: ?string,
      *     widget_shell: ?string,
+     *     timeout: ?int,
+     *     show_config: bool,
+     *     dump_prompt: bool,
      *     args: array<int, string>
      * }
      */
@@ -454,6 +478,7 @@ final class Application
         $timeout = null;
         $showConfig = false;
         $configMode = false;
+        $dumpPrompt = false;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -471,6 +496,7 @@ final class Application
         $version = (bool) $input->getOption('version');
         $showConfig = (bool) $input->getOption('show-config');
         $configMode = (bool) $input->getOption('config');
+        $dumpPrompt = (bool) $input->getOption('dump-prompt');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
         $isExplain = (bool) $input->getOption('explain');
@@ -516,7 +542,8 @@ final class Application
                 help: $help,
                 version: $version,
                 numOptionName: $numOptionName,
-                timeoutOptionName: $timeoutOptionName
+                timeoutOptionName: $timeoutOptionName,
+                dumpPrompt: $dumpPrompt
             );
             if ($conflicts !== []) {
                 throw new \RuntimeException(sprintf(
@@ -545,6 +572,7 @@ final class Application
             'widget_shell' => $widgetShell,
             'timeout' => $timeout,
             'show_config' => $showConfig,
+            'dump_prompt' => $dumpPrompt,
             'args' => array_values($remaining),
         ];
     }
@@ -724,6 +752,7 @@ final class Application
         bool $showConfig,
         bool $help,
         bool $version,
+        bool $dumpPrompt,
         ?string $numOptionName,
         ?string $timeoutOptionName
     ): array {
@@ -758,6 +787,10 @@ final class Application
 
         if ($version) {
             $conflicts[] = '--version';
+        }
+
+        if ($dumpPrompt) {
+            $conflicts[] = '--dump-prompt';
         }
 
         if ($numOptionName !== null) {
@@ -1089,6 +1122,7 @@ final class Application
             new InputOption('shell', null, InputOption::VALUE_NONE, 'Emit only the selected suggestion for shell integration widgets.'),
             new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
             new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips model requests).'),
+            new InputOption('dump-prompt', null, InputOption::VALUE_NONE, 'Print the raw LLM prompt that would be sent and exit.'),
             new InputOption(
                 'widget',
                 null,
