@@ -6,7 +6,7 @@ namespace Mike\Shsuggest;
 
 use RuntimeException;
 
-final class OllamaClient
+final class OllamaClient implements SuggestionSource
 {
     /**
      * @var array{eval_count:?int,eval_duration:?float,total_duration:?float}|null

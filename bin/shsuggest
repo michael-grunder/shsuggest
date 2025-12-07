@@ -7,17 +7,12 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Mike\Shsuggest\Application;
 use Mike\Shsuggest\ConfigLoader;
-use Mike\Shsuggest\OllamaClient;
+use Mike\Shsuggest\SuggestionSourceFactory;
 
 $loader = new ConfigLoader();
 $config = $loader->load();
-$client = new OllamaClient(
-    $config->getOllamaEndpoint(),
-    $config->getModel(),
-    $config->getTemperature(),
-    $config->getRequestTimeout(),
-    $config->getNumThread()
-);
+$factory = new SuggestionSourceFactory($config);
+$client = $factory->create();
 
 $app = new Application($config, $client, $loader);
 exit($app->run($argv));

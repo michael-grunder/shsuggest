@@ -42,7 +42,7 @@ final class Application
 
     public function __construct(
         private Config $config,
-        private OllamaClient $client,
+        private SuggestionSource $client,
         ?ConfigLoader $configLoader = null
     ) {
         $this->configLoader = $configLoader ?? new ConfigLoader();
@@ -621,10 +621,20 @@ final class Application
         }
     }
 
-    private function formatConfigValue(string|float|int|null $value): string
+    private function formatConfigValue(mixed $value): string
     {
         if ($value === null) {
             return 'null';
+        }
+
+        if (is_array($value)) {
+            $encoded = json_encode($value, JSON_UNESCAPED_SLASHES);
+
+            return $encoded === false ? '[complex value]' : $encoded;
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
         }
 
         if (is_string($value)) {
@@ -888,6 +898,7 @@ final class Application
             'ollama_endpoint' => $this->parseEndpoint($trimmed),
             'pipe_first_into' => $this->parsePipeProgram($trimmed),
             'model' => $this->validateModelChoice($trimmed),
+            'source' => $this->normalizeSourceName($trimmed),
             default => $trimmed,
         };
     }
@@ -945,13 +956,27 @@ final class Application
         return $program;
     }
 
+    private function normalizeSourceName(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            throw new \RuntimeException('Please provide a value for "source".');
+        }
+
+        if (!preg_match('/^[a-z0-9_-]+$/', $normalized)) {
+            throw new \RuntimeException('source may only include letters, numbers, "-", or "_".');
+        }
+
+        return $normalized;
+    }
+
     private function validateModelChoice(string $model): string
     {
         try {
             $available = $this->client->listAvailableModels();
-        } catch (OllamaClientException $exception) {
+        } catch (SuggestionSourceException $exception) {
             throw new \RuntimeException(
-                'Unable to query Ollama for installed models: ' . $exception->getMessage(),
+                'Unable to query the configured source for installed models: ' . $exception->getMessage(),
                 0,
                 $exception
             );
@@ -1043,10 +1068,10 @@ final class Application
             new InputOption('explain', 'e', InputOption::VALUE_NONE, 'Explain the provided shell command instead of generating suggestions.'),
             new InputOption('json', 'j', InputOption::VALUE_NONE, 'Emit machine-readable JSON.'),
             new InputOption('num', 'n', InputOption::VALUE_REQUIRED, 'Request N suggestions (default comes from the config file).'),
-            new InputOption('timeout', 't', InputOption::VALUE_REQUIRED, 'Override the Ollama request timeout (seconds).'),
+            new InputOption('timeout', 't', InputOption::VALUE_REQUIRED, 'Override the LLM request timeout (seconds).'),
             new InputOption('shell', null, InputOption::VALUE_NONE, 'Emit only the selected suggestion for shell integration widgets.'),
             new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
-            new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips Ollama requests).'),
+            new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips model requests).'),
             new InputOption(
                 'widget',
                 null,

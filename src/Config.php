@@ -6,22 +6,44 @@ namespace Mike\Shsuggest;
 
 final class Config
 {
-    private const DEFAULTS = [
+    private const DEFAULT_SOURCE = 'ollama';
+    private const OLLAMA_DEFAULT_ENDPOINT = 'http://127.0.0.1:11434';
+
+    private const TOP_LEVEL_DEFAULTS = [
         'model' => 'gemma3',
-        'ollama_endpoint' => 'http://127.0.0.1:11434',
         'num_suggestions' => 1,
         'temperature' => 0.3,
         'num_thread' => null,
         'pipe_first_into' => null,
         'request_timeout' => 30,
+        'source' => self::DEFAULT_SOURCE,
     ];
+
+    private const SOURCE_DEFAULTS = [
+        'ollama' => [
+            'endpoint' => self::OLLAMA_DEFAULT_ENDPOINT,
+            'scheme' => 'http',
+            'host' => '127.0.0.1',
+            'port' => 11434,
+        ],
+    ];
+
+    /**
+     * @var array<string, mixed>
+     */
+    private array $values = [];
+
+    /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $sourceSettings = [];
 
     /**
      * @param array<string, mixed> $values
      */
-    public function __construct(private array $values = [])
+    public function __construct(array $values = [])
     {
-        $this->values = array_replace(self::DEFAULTS, $values);
+        $this->initializeValues($values);
     }
 
     public function getModel(): string
@@ -29,9 +51,36 @@ final class Config
         return (string) $this->values['model'];
     }
 
+    public function getSource(): string
+    {
+        $source = strtolower(trim((string) ($this->values['source'] ?? self::DEFAULT_SOURCE)));
+
+        return $source === '' ? self::DEFAULT_SOURCE : $source;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getSourceSettings(string $source): array
+    {
+        $key = strtolower($source);
+
+        if (isset($this->sourceSettings[$key])) {
+            return $this->sourceSettings[$key];
+        }
+
+        return $this->sourceSettings[self::DEFAULT_SOURCE] ?? [];
+    }
+
+    /**
+     * Legacy accessor preserved for compatibility.
+     */
     public function getOllamaEndpoint(): string
     {
-        return rtrim((string) $this->values['ollama_endpoint'], '/');
+        $settings = $this->getSourceSettings('ollama');
+        $endpoint = (string) ($settings['endpoint'] ?? self::OLLAMA_DEFAULT_ENDPOINT);
+
+        return rtrim($endpoint, '/');
     }
 
     public function getNumSuggestions(): int
@@ -73,6 +122,79 @@ final class Config
      */
     public static function defaults(): array
     {
-        return self::DEFAULTS;
+        return array_replace(
+            self::TOP_LEVEL_DEFAULTS,
+            ['ollama_endpoint' => self::OLLAMA_DEFAULT_ENDPOINT]
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private function initializeValues(array $values): void
+    {
+        $topLevel = [];
+        $sources = [];
+
+        foreach ($values as $key => $value) {
+            if (!is_string($key)) {
+                continue;
+            }
+
+            if (array_key_exists($key, self::TOP_LEVEL_DEFAULTS) || $key === 'ollama_endpoint') {
+                $topLevel[$key] = $value;
+                continue;
+            }
+
+            if (is_array($value)) {
+                $sources[strtolower($key)] = $this->filterSourceSettings($value);
+            }
+        }
+
+        $this->values = array_replace(self::TOP_LEVEL_DEFAULTS, $topLevel);
+        $this->sourceSettings = $this->mergeSourceDefaults($sources);
+
+        $legacyEndpoint = $this->values['ollama_endpoint'] ?? null;
+        if (is_string($legacyEndpoint) && $legacyEndpoint !== '') {
+            $this->sourceSettings['ollama']['endpoint'] = rtrim($legacyEndpoint, '/');
+        }
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function mergeSourceDefaults(array $sources): array
+    {
+        $merged = [];
+
+        foreach (self::SOURCE_DEFAULTS as $name => $defaults) {
+            $merged[$name] = $defaults;
+        }
+
+        foreach ($sources as $name => $settings) {
+            $lower = strtolower($name);
+            $existing = $merged[$lower] ?? [];
+            $merged[$lower] = array_replace($existing, $settings);
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     *
+     * @return array<string, mixed>
+     */
+    private function filterSourceSettings(array $settings): array
+    {
+        $filtered = [];
+
+        foreach ($settings as $key => $value) {
+            if (is_string($key)) {
+                $filtered[$key] = $value;
+            }
+        }
+
+        return $filtered;
     }
 }

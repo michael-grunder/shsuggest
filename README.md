@@ -28,8 +28,8 @@ shsuggest -e|--explain [COMMAND]
 * Use `--json` (or `-j`) to emit machine-readable output; interactive prompts are skipped automatically in this mode.
 * Use `--show-config` to print the settings parsed from `~/.shsuggest` and exit.
 * Use `--shell` when invoking from shell widgets/integration so only the selected suggestion is written to STDOUT.
-* Use `--dry-run` to instantly emit dummy suggestions without contacting Ollama—handy when testing UI flows.
-* Use `-t 60` (or `--timeout=60`) to override the Ollama request timeout for a single run.
+* Use `--dry-run` to instantly emit dummy suggestions without contacting the configured source—handy when testing UI flows.
+* Use `-t 60` (or `--timeout=60`) to override the model request timeout for a single run.
 * When STDOUT is not a TTY, the selected command is also echoed to STDERR so you can still see/copy it while piping.
 
 Examples:
@@ -73,13 +73,29 @@ Re-run the command whenever you update the binary so the hook stays in sync.
 
 ```toml
 model = "llama3"
-ollama_endpoint = "http://127.0.0.1:11434"
+source = "ollama"
 num_suggestions = 1
 temperature = 0.35
 num_thread = 32
 request_timeout = 30
 pipe_first_into = "pbcopy"
+
+[ollama]
+endpoint = "http://127.0.0.1:11434"
+# or split the endpoint into parts:
+host = "127.0.0.1"
+port = 11434
+scheme = "http"
+
+[openai]
+api_key = "sk-YOUR-KEY"
+base_url = "https://api.openai.com/v1"
 ```
+
+`source` selects which backend to use. Only `ollama` is implemented today, but the additional tables allow you
+to keep credentials for other adapters that may be added later. The `[ollama]` table accepts a full `endpoint`
+or separate host/port/scheme parts (the endpoint wins when both are provided). The legacy top-level
+`ollama_endpoint` key is still honored for backwards compatibility.
 
 `num_suggestions` controls the default value passed to `-n/--num` when it isn't provided explicitly.
 Invalid values are ignored (and reset to 1) with a warning.
@@ -88,16 +104,17 @@ The `pipe_first_into` entry lets you feed the first suggestion into another prog
 macOS to copy the command to the clipboard). Even when multiple suggestions are shown interactively, only the
 first suggestion is piped.
 
-`num_thread` is forwarded to Ollama's `options.num_thread` field, which can be used when targeting models that
-benefit from a specific thread count.
+`num_thread` is forwarded to Ollama's `options.num_thread` field when that adapter is active, which can be used
+when targeting models that benefit from a specific thread count.
 
-`request_timeout` (or the `-t/--timeout` CLI option) controls how long `shsuggest` waits for Ollama to respond before
-failing the request. Increase it when running slower models or reduce it if you'd like to fail fast.
+`request_timeout` (or the `-t/--timeout` CLI option) controls how long `shsuggest` waits for the backend to
+respond before failing the request. Increase it when running slower models or reduce it if you'd like to fail
+fast.
 
 Run `shsuggest --show-config` at any time to confirm which settings were parsed from your dotfile.
 
 To edit the file from the CLI, use `shsuggest --config set <key> <value>`. Values are validated before being
-written—numeric fields reject invalid numbers and the `model` entry is checked against the models registered
-with your local Ollama instance. Pass `default`, `none`, or `null` as the value to remove an override and fall
-back to the built-in defaults. Older `key=value` files are still recognized, and the next call to
-`shsuggest --config set …` will convert them to TOML automatically.
+written—numeric fields reject invalid numbers and the `model` entry is checked against the models reported by
+the active source. Pass `default`, `none`, or `null` as the value to remove an override and fall back to the
+built-in defaults. Older `key=value` files are still recognized, and the next call to `shsuggest --config set
+…` will convert them to TOML automatically.

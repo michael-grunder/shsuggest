@@ -31,22 +31,13 @@ final class ConfigLoader
     }
 
     /**
-     * @return array<string, string|float|int|null>
+     * @return array<string, mixed>
      */
     public function loadValues(): array
     {
         $values = $this->parseConfigFile(failOnParseError: false);
 
-        $scalarsOnly = [];
-        foreach ($values as $key => $value) {
-            if (is_int($value) || is_float($value) || is_string($value) || $value === null) {
-                $scalarsOnly[$key] = $value;
-            }
-        }
-
-        $scalarsOnly = $this->validateOptions($scalarsOnly);
-
-        return $scalarsOnly;
+        return $this->validateOptions($values);
     }
 
     public function getPath(): string
@@ -68,17 +59,28 @@ final class ConfigLoader
     }
 
     /**
-     * @param array<string, string|float|int|null> $values
-     * @return array<string, string|float|int|null>
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
      */
     private function validateOptions(array $values): array
     {
         if (array_key_exists('num_suggestions', $values)) {
-            $parsed = $this->validateNumSuggestions($values['num_suggestions']);
-            if ($parsed === null) {
-                unset($values['num_suggestions']);
+            $candidate = $values['num_suggestions'];
+            if (
+                is_int($candidate)
+                || is_float($candidate)
+                || is_string($candidate)
+                || $candidate === null
+            ) {
+                $parsed = $this->validateNumSuggestions($candidate);
+                if ($parsed === null) {
+                    unset($values['num_suggestions']);
+                } else {
+                    $values['num_suggestions'] = $parsed;
+                }
             } else {
-                $values['num_suggestions'] = $parsed;
+                $this->warnInvalidOption($candidate, 'num_suggestions');
+                unset($values['num_suggestions']);
             }
         }
 
@@ -109,11 +111,14 @@ final class ConfigLoader
         return $num;
     }
 
-    private function warnInvalidOption(string|float|int|null $value, string $option): void
+    private function warnInvalidOption(mixed $value, string $option): void
     {
         $formattedValue = match (true) {
             is_int($value), is_float($value) => (string) $value,
             $value === null => 'null',
+            is_string($value) => $value,
+            is_array($value) => '[array]',
+            is_bool($value) => $value ? 'true' : 'false',
             default => (string) $value,
         };
 
@@ -171,19 +176,8 @@ final class ConfigLoader
             }
         }
 
-        ksort($values);
-
         $builder = new TomlBuilder(0);
-
-        foreach ($values as $key => $value) {
-            if ($value === null) {
-                continue;
-            }
-
-            if (is_int($value) || is_float($value) || is_string($value) || is_bool($value)) {
-                $builder->addValue($key, $value);
-            }
-        }
+        $this->dumpTomlValues($builder, $values, []);
 
         $contents = $builder->getTomlString();
 
@@ -203,4 +197,42 @@ final class ConfigLoader
         fwrite(STDERR, $message . PHP_EOL);
     }
 
+    /**
+     * @param array<string, mixed> $values
+     * @param string[] $path
+     */
+    private function dumpTomlValues(TomlBuilder $builder, array $values, array $path): void
+    {
+        ksort($values);
+
+        $scalars = [];
+        $tables = [];
+
+        foreach ($values as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_array($value) && $this->isAssociativeArray($value)) {
+                $tables[(string) $key] = $value;
+            } else {
+                $scalars[(string) $key] = $value;
+            }
+        }
+
+        foreach ($scalars as $key => $value) {
+            $builder->addValue($key, $value);
+        }
+
+        foreach ($tables as $key => $tableValues) {
+            $tablePath = array_merge($path, [$key]);
+            $builder->addTable(implode('.', $tablePath));
+            $this->dumpTomlValues($builder, $tableValues, $tablePath);
+        }
+    }
+
+    private function isAssociativeArray(array $values): bool
+    {
+        return array_keys($values) !== range(0, count($values) - 1);
+    }
 }
