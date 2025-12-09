@@ -616,6 +616,19 @@ final class Application
     private function printVersion(): void
     {
         $this->writeLine(sprintf('shsuggest %s', Version::CURRENT));
+
+        $buildInfo = Version::buildInfo();
+        $hasBuildInfo = $buildInfo['build_date'] !== null || $buildInfo['git_sha'] !== null;
+
+        if ($hasBuildInfo) {
+            if ($buildInfo['build_date'] !== null) {
+                $this->writeLine(sprintf('Built: %s', $buildInfo['build_date']));
+            }
+
+            if ($buildInfo['git_sha'] !== null) {
+                $this->writeLine(sprintf('Git SHA: %s', $buildInfo['git_sha']));
+            }
+        }
     }
 
     private function printConfigSettings(): void
