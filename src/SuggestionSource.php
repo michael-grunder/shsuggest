@@ -7,9 +7,9 @@ namespace Mike\Shsuggest;
 interface SuggestionSource
 {
     /**
-     * @return Suggestion[]
+     * @return SuggestionResponse
      */
-    public function suggest(string $prompt, int $count): array;
+    public function suggest(string $prompt, int $count): SuggestionResponse;
 
     public function explain(string $command): string;
 

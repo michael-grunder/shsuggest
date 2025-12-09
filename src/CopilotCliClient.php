@@ -26,9 +26,9 @@ final class CopilotCliClient implements SuggestionSource
     }
 
     /**
-     * @return Suggestion[]
+     * @return SuggestionResponse
      */
-    public function suggest(string $prompt, int $count): array
+    public function suggest(string $prompt, int $count): SuggestionResponse
     {
         $instruction = $this->renderSuggestionPrompt($prompt, $count);
         $response = $this->runCopilotCommand($instruction);
@@ -54,7 +54,9 @@ final class CopilotCliClient implements SuggestionSource
             throw new CopilotCliException('No usable suggestions were returned by the LLM.');
         }
 
-        return $suggestions;
+        $normalizedPrompt = $this->resolveNormalizedPrompt($decoded, $prompt);
+
+        return new SuggestionResponse($suggestions, $normalizedPrompt);
     }
 
     public function explain(string $command): string
@@ -229,6 +231,7 @@ final class CopilotCliClient implements SuggestionSource
 You generate shell commands for experienced terminal users.
 Respond ONLY with valid JSON that matches this schema:
 {
+  "normalized_prompt": "human prompt rewritten clearly",
   "suggestions": [
     {
       "command": "one line shell command",
@@ -238,6 +241,7 @@ Respond ONLY with valid JSON that matches this schema:
 }
 Create {$count} suggestions that satisfy the schema.
 Keep commands concise, safe, and deterministic when possible.
+Rewrite the human prompt into normalized_prompt, fixing typos and grammar without changing intent.
 Respect the system context, especially when commands differ across shells or operating systems.
 {$contextBlock}Human prompt:
 """{$prompt}"""
@@ -255,6 +259,19 @@ Respond ONLY with valid JSON that matches this schema:
 Explain the following command and mention potential hazards:
 """{$command}"""
 PROMPT;
+    }
+
+    /**
+     * @param array<string, mixed> $decoded
+     */
+    private function resolveNormalizedPrompt(array $decoded, string $fallback): string
+    {
+        $candidate = isset($decoded['normalized_prompt'])
+            ? trim((string) $decoded['normalized_prompt'])
+            : '';
+        $fallback = trim($fallback);
+
+        return $candidate !== '' ? $candidate : $fallback;
     }
 
     /**

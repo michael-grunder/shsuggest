@@ -179,9 +179,14 @@ final class Application
         }
 
         $generationStartedAt = microtime(true);
-        $suggestions = $dryRun
+        $response = $dryRun
             ? $this->generateDryRunSuggestions($prompt, $requested)
             : $this->client->suggest($prompt, $requested);
+        $suggestions = $response->getSuggestions();
+        $normalizedPrompt = $response->getNormalizedPrompt() ?? $prompt;
+        if ($suggestions === []) {
+            throw new \RuntimeException('No suggestions were returned.');
+        }
         $generationDuration = microtime(true) - $generationStartedAt;
         $tokensPerSecond = $dryRun
             ? null
@@ -198,6 +203,7 @@ final class Application
                 'mode' => 'suggest',
                 'model' => $model,
                 'prompt' => $prompt,
+                'normalized_prompt' => $normalizedPrompt,
                 'suggestions' => $this->suggestionsToArray($suggestions),
             ]);
 
@@ -414,10 +420,7 @@ final class Application
         return trim($line ?: '');
     }
 
-    /**
-     * @return Suggestion[]
-     */
-    private function generateDryRunSuggestions(string $prompt, int $count): array
+    private function generateDryRunSuggestions(string $prompt, int $count): SuggestionResponse
     {
         $summary = $this->summarizePromptForDryRun($prompt);
         $count = max(1, $count);
@@ -429,7 +432,9 @@ final class Application
             $suggestions[] = new Suggestion($command, $description);
         }
 
-        return $suggestions;
+        $normalizedPrompt = $this->normalizePromptForHistory($prompt);
+
+        return new SuggestionResponse($suggestions, $normalizedPrompt);
     }
 
     private function summarizePromptForDryRun(string $prompt): string
@@ -444,6 +449,13 @@ final class Application
         }
 
         return $prompt;
+    }
+
+    private function normalizePromptForHistory(string $prompt): string
+    {
+        $collapsed = trim((string) preg_replace('/\s+/', ' ', $prompt));
+
+        return $collapsed !== '' ? $collapsed : trim($prompt);
     }
 
     /**
