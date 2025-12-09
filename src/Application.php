@@ -615,20 +615,22 @@ final class Application
 
     private function printVersion(): void
     {
-        $this->writeLine(sprintf('shsuggest %s', Version::CURRENT));
-
         $buildInfo = Version::buildInfo();
-        $hasBuildInfo = $buildInfo['build_date'] !== null || $buildInfo['git_sha'] !== null;
+        $segments = [];
 
-        if ($hasBuildInfo) {
-            if ($buildInfo['build_date'] !== null) {
-                $this->writeLine(sprintf('Built: %s', $buildInfo['build_date']));
-            }
-
-            if ($buildInfo['git_sha'] !== null) {
-                $this->writeLine(sprintf('Git SHA: %s', $buildInfo['git_sha']));
-            }
+        if ($buildInfo['build_date'] !== null) {
+            $segments[] = $buildInfo['build_date'];
         }
+
+        if ($buildInfo['git_sha'] !== null) {
+            $segments[] = substr($buildInfo['git_sha'], 0, 7);
+        }
+
+        $suffix = $segments === []
+            ? ''
+            : sprintf(' (%s)', implode(' - ', $segments));
+
+        $this->writeLine(sprintf('shsuggest %s%s', Version::CURRENT, $suffix));
     }
 
     private function printConfigSettings(): void
