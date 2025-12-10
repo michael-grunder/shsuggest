@@ -59,17 +59,13 @@ final class CopilotCliClient implements SuggestionSource
         return new SuggestionResponse($suggestions, $normalizedPrompt);
     }
 
-    public function explain(string $command): string
+    public function explain(string $command): Explanation
     {
         $instruction = $this->renderExplainPrompt($command);
         $response = $this->runCopilotCommand($instruction);
-        $decoded = $this->decodeJson($response, 'explanation');
+        $decoded = $this->decodeJson($response, 'summary');
 
-        if (!isset($decoded['explanation'])) {
-            throw new CopilotCliException('LLM response missing "explanation" field.');
-        }
-
-        return trim((string) $decoded['explanation']);
+        return Explanation::fromArray($decoded);
     }
 
     public function withTimeout(int $timeout): SuggestionSource
@@ -254,7 +250,17 @@ PROMPT;
 You explain shell commands clearly and safely.
 Respond ONLY with valid JSON that matches this schema:
 {
-  "explanation": "plain language explanation"
+  "summary": "1-2 sentence overview in plain language",
+  "breakdown": [
+    {
+      "component": "piece of the command",
+      "detail": "what that piece does"
+    }
+  ],
+  "hazards": [
+    "risk, safety concern, or caveat"
+  ],
+  "notes": "optional extra tips"
 }
 Explain the following command and mention potential hazards:
 """{$command}"""

@@ -1209,7 +1209,7 @@ final class Application
         return false;
     }
 
-    private function renderExplanation(string $command, string $explanation): void
+    private function renderExplanation(string $command, Explanation $explanation): void
     {
         if ($this->isTty(STDERR)) {
             fwrite(STDERR, PHP_EOL . $this->style('🧠 Explanation', 'title', STDERR) . PHP_EOL);
@@ -1221,7 +1221,102 @@ final class Application
             fwrite(STDERR, $line . PHP_EOL . PHP_EOL);
         }
 
-        $this->writeLine($explanation);
+        $printedSection = false;
+        $printedSection = $this->renderExplanationParagraphSection('Summary', $explanation->getSummary(), $printedSection);
+        $printedSection = $this->renderExplanationBreakdownSection($explanation->getBreakdown(), $printedSection);
+        $printedSection = $this->renderExplanationHazardsSection($explanation->getHazards(), $printedSection);
+        $this->renderExplanationParagraphSection('Notes', $explanation->getNotes() ?? '', $printedSection);
+    }
+
+    /**
+     * @param array<int, array{component: string, detail: string}> $entries
+     */
+    private function renderExplanationBreakdownSection(array $entries, bool $printed): bool
+    {
+        if ($entries === []) {
+            return $printed;
+        }
+
+        if ($printed) {
+            $this->write(PHP_EOL);
+        }
+
+        $this->writeLine($this->style('Key parts', 'accent', STDOUT));
+        foreach ($entries as $entry) {
+            $line = sprintf(
+                '  %s %s %s',
+                $this->style('•', 'muted', STDOUT),
+                $this->style($entry['component'], 'command', STDOUT),
+                $entry['detail']
+            );
+            $this->writeLine($line);
+        }
+
+        return true;
+    }
+
+    /**
+     * @param string[] $hazards
+     */
+    private function renderExplanationHazardsSection(array $hazards, bool $printed): bool
+    {
+        if ($hazards === []) {
+            $hazards = ['No significant hazards noted.'];
+        }
+
+        if ($printed) {
+            $this->write(PHP_EOL);
+        }
+
+        $this->writeLine($this->style('Hazards', 'accent', STDOUT));
+        foreach ($hazards as $hazard) {
+            $line = sprintf(
+                '  %s %s',
+                $this->style('⚠', 'error', STDOUT),
+                $hazard
+            );
+            $this->writeLine($line);
+        }
+
+        return true;
+    }
+
+    private function renderExplanationParagraphSection(string $label, string $text, bool $printed): bool
+    {
+        $lines = $this->normalizeParagraphLines($text);
+        if ($lines === []) {
+            return $printed;
+        }
+
+        if ($printed) {
+            $this->write(PHP_EOL);
+        }
+
+        $this->writeLine($this->style($label, 'accent', STDOUT));
+        foreach ($lines as $line) {
+            $this->writeLine('  ' . $line);
+        }
+
+        return true;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function normalizeParagraphLines(string $text): array
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return [];
+        }
+
+        $lines = preg_split('/\r?\n/', $text) ?: [];
+
+        return array_values(array_filter(array_map(static function (string $line): string {
+            return trim($line);
+        }, $lines), static function (string $line): bool {
+            return $line !== '';
+        }));
     }
 
     private function renderSelectedSuggestion(Suggestion $suggestion, bool $fromInteractive): ?string

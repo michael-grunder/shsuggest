@@ -11,7 +11,7 @@ interface SuggestionSource
      */
     public function suggest(string $prompt, int $count): SuggestionResponse;
 
-    public function explain(string $command): string;
+    public function explain(string $command): Explanation;
 
     public function withTimeout(int $timeout): self;
 
