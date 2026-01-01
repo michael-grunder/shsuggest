@@ -1,9 +1,9 @@
 shsuggest
 =========
 
-`shsuggest` is a lightweight replacement for the deprecated `gh copilot suggest`/`explain` commands. It talks
-to a local [Ollama](https://ollama.com) instance or the GitHub Copilot CLI to generate shell commands or
-explain existing ones, and ships as a single PHAR for easy distribution.
+`shsuggest` is a lightweight replacement for the deprecated `gh copilot suggest`/`explain` commands. It supports
+multiple suggestion sources via pluggable adapters (currently [Ollama](https://ollama.com) and the GitHub Copilot
+CLI) to generate shell commands or explain existing ones, and ships as a single PHAR for easy distribution.
 
 ## Installation
 
@@ -14,8 +14,8 @@ mv shsuggest.phar /usr/local/bin/shsuggest
 chmod +x /usr/local/bin/shsuggest
 ```
 
-> Composer must be installed locally. You'll also need either a running Ollama instance (`ollama serve`) or the
-> GitHub Copilot CLI available on your PATH (or set `copilot.binary`).
+> Composer must be installed locally. You'll also need at least one configured source adapter, such as a running
+> Ollama instance (`ollama serve`) or the GitHub Copilot CLI available on your PATH (or set `copilot.binary`).
 
 ## Usage
 
@@ -43,6 +43,15 @@ shsuggest -n 3 "prepare a git release"
 shsuggest --explain 'find . -name "*.log" -delete'
 shsuggest --json 'list running docker containers with ids'
 ```
+
+## Sources
+
+`shsuggest` uses source adapters to connect to different backends. Built-in adapters include:
+
+- `ollama`: a local Ollama server over HTTP.
+- `copilot`: the GitHub Copilot CLI.
+
+Pick the active adapter with the `source` setting in `~/.shsuggest` or by passing `--config set source <name>`.
 
 ### Shell widgets
 
@@ -98,7 +107,8 @@ binary = "/home/you/.local/bin/copilot"
 shells out to the GitHub Copilot CLI (override `copilot.binary` if it lives somewhere else). The `[ollama]`
 table accepts a full `endpoint` or separate host/port/scheme parts (the endpoint wins when both are provided)
 as well as the `model` to query. The legacy top-level `ollama_endpoint` and `model` keys are still honored for
-backwards compatibility.
+backwards compatibility. Additional adapters can be added over time; the `source` key just picks the one you
+want to use.
 
 The Copilot adapter ignores `temperature` and thread settings but still respects `num_suggestions`,
 `request_timeout`, and the prompt-rendering options. Customize `copilot.model` if you want the UI to display a
