@@ -14,6 +14,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputDefinition;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\StreamOutput;
+use function Laravel\Prompts\search;
 use function Laravel\Prompts\select;
 
 final class Application
@@ -43,6 +44,7 @@ final class Application
     private OutputFormatter $stdoutFormatter;
     private OutputFormatter $stderrFormatter;
     private ConfigLoader $configLoader;
+    private HistoryStore $historyStore;
 
     public function __construct(
         private Config $config,
@@ -50,6 +52,7 @@ final class Application
         ?ConfigLoader $configLoader = null
     ) {
         $this->configLoader = $configLoader ?? new ConfigLoader();
+        $this->historyStore = new HistoryStore();
         $this->pipeRunner = new PipeRunner();
         $this->stdoutFormatter = $this->createFormatter($this->isTty(STDOUT));
         $this->stderrFormatter = $this->createFormatter($this->isTty(STDERR));
@@ -109,6 +112,10 @@ final class Application
 
         if ($mode === 'config') {
             return $this->runConfigCommand($args);
+        }
+
+        if ($mode === 'history') {
+            return $this->runHistoryCommand();
         }
 
         if ($dryRun && $mode !== 'suggest') {
@@ -229,6 +236,10 @@ final class Application
             }
         } else {
             $choice = $suggestions[0];
+        }
+
+        if (!$dryRun) {
+            $this->recordHistory($prompt, $normalizedPrompt, $choice, $model);
         }
 
         if ($shellIntegration) {
@@ -458,6 +469,259 @@ final class Application
         return $collapsed !== '' ? $collapsed : trim($prompt);
     }
 
+    private function runHistoryCommand(): int
+    {
+        $entries = $this->historyStore->loadEntries();
+        if ($entries === []) {
+            $this->writeLine('No history entries found yet.');
+
+            return 0;
+        }
+
+        $entries = array_values(array_reverse($entries));
+
+        if (!$this->isInteractive()) {
+            foreach ($entries as $entry) {
+                $command = trim((string) ($entry['command'] ?? ''));
+                if ($command !== '') {
+                    $this->writeLine($command);
+                }
+            }
+
+            return 0;
+        }
+
+        $scroll = min(10, max(5, count($entries)));
+        $selection = search(
+            label: '⌛ History',
+            options: fn (string $query): array => $this->historyOptionsForQuery($entries, $query),
+            placeholder: 'Search previous suggestions...',
+            scroll: $scroll,
+            hint: 'Type to filter, Enter to choose.',
+        );
+
+        $selectionKey = $this->normalizeHistorySelectionKey($selection);
+        $entry = $selectionKey !== null ? ($entries[$selectionKey] ?? null) : null;
+        if ($entry === null) {
+            return 0;
+        }
+
+        $command = trim((string) ($entry['command'] ?? ''));
+        if ($command === '') {
+            return 0;
+        }
+
+        $this->renderSelectedHistory($command, true);
+
+        return 0;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $entries
+     * @return array<int|string, string>
+     */
+    private function historyOptionsForQuery(array $entries, string $query): array
+    {
+        $normalizedQuery = strtolower(trim($query));
+        $matches = [];
+
+        foreach ($entries as $index => $entry) {
+            $searchText = $this->historySearchText($entry);
+            $score = $normalizedQuery === ''
+                ? $index
+                : $this->scoreHistoryMatch($normalizedQuery, $searchText);
+
+            if ($score === null) {
+                continue;
+            }
+
+            $matches[] = [
+                'index' => $index,
+                'score' => $score,
+                'label' => $this->formatHistoryEntry($entry),
+            ];
+        }
+
+        usort($matches, static function (array $a, array $b): int {
+            if ($a['score'] === $b['score']) {
+                return $a['index'] <=> $b['index'];
+            }
+
+            return $a['score'] <=> $b['score'];
+        });
+
+        $options = [];
+        $limit = 50;
+        foreach ($matches as $match) {
+            $options[$match['index']] = $match['label'];
+            if (count($options) >= $limit) {
+                break;
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private function formatHistoryEntry(array $entry): string
+    {
+        $command = trim((string) ($entry['command'] ?? ''));
+        $description = trim((string) ($entry['description'] ?? ''));
+        $prompt = trim((string) ($entry['prompt'] ?? ''));
+        $normalized = trim((string) ($entry['normalized_prompt'] ?? ''));
+        $timestamp = trim((string) ($entry['timestamp'] ?? ''));
+
+        $details = [];
+        $promptText = $prompt !== '' ? $prompt : $normalized;
+        if ($promptText !== '') {
+            $details[] = $promptText;
+        }
+
+        if ($description !== '') {
+            $details[] = $description;
+        }
+
+        $timeLabel = $this->formatHistoryTimestamp($timestamp);
+        if ($timeLabel !== '') {
+            $details[] = $timeLabel;
+        }
+
+        if ($details === []) {
+            return $command;
+        }
+
+        return $command . PHP_EOL . '    ↳ ' . implode(' | ', $details);
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private function historySearchText(array $entry): string
+    {
+        $parts = [];
+
+        foreach (['command', 'prompt', 'normalized_prompt', 'description', 'model'] as $key) {
+            $value = trim((string) ($entry[$key] ?? ''));
+            if ($value !== '') {
+                $parts[] = $value;
+            }
+        }
+
+        return strtolower(implode(' ', $parts));
+    }
+
+    private function scoreHistoryMatch(string $query, string $text): ?int
+    {
+        if ($query === '') {
+            return 0;
+        }
+
+        if ($text === '') {
+            return null;
+        }
+
+        $direct = strpos($text, $query);
+        if ($direct !== false) {
+            return $direct;
+        }
+
+        $score = 0;
+        $offset = 0;
+        $queryLength = strlen($query);
+        for ($i = 0; $i < $queryLength; $i++) {
+            $char = $query[$i];
+            $found = strpos($text, $char, $offset);
+            if ($found === false) {
+                return null;
+            }
+
+            $score += $found;
+            $offset = $found + 1;
+        }
+
+        return $score + strlen($text);
+    }
+
+    private function formatHistoryTimestamp(string $timestamp): string
+    {
+        if ($timestamp === '') {
+            return '';
+        }
+
+        try {
+            $parsed = new \DateTimeImmutable($timestamp);
+
+            return $parsed->format('Y-m-d H:i');
+        } catch (\Throwable $exception) {
+            return $timestamp;
+        }
+    }
+
+    private function normalizeHistorySelectionKey(int|string|null $selection): int|string|null
+    {
+        if ($selection === null) {
+            return null;
+        }
+
+        if (is_int($selection)) {
+            return $selection;
+        }
+
+        $trimmed = trim($selection);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (ctype_digit($trimmed)) {
+            return (int) $trimmed;
+        }
+
+        return $trimmed;
+    }
+
+    private function renderSelectedHistory(string $command, bool $fromInteractive): void
+    {
+        if ($fromInteractive && $this->isTty(STDERR)) {
+            fwrite(STDERR, PHP_EOL . $this->style('✔ Selected history', 'title', STDERR) . PHP_EOL);
+        }
+
+        $this->writeLine($this->style($command, 'command', STDOUT));
+    }
+
+    private function recordHistory(
+        string $prompt,
+        string $normalizedPrompt,
+        Suggestion $suggestion,
+        string $model
+    ): void {
+        $command = $suggestion->getCommand();
+        if (trim($command) === '') {
+            return;
+        }
+
+        $entry = [
+            'timestamp' => date('c'),
+            'command' => $command,
+            'description' => $suggestion->getDescription(),
+            'prompt' => $this->normalizePromptForHistory($prompt),
+            'normalized_prompt' => $this->normalizePromptForHistory($normalizedPrompt),
+            'model' => $model,
+        ];
+
+        try {
+            $this->historyStore->append($entry);
+        } catch (\Throwable $exception) {
+            $warning = sprintf(
+                '%s %s',
+                $this->style('⚠ Warning:', 'error', STDERR),
+                $exception->getMessage()
+            );
+            fwrite(STDERR, $warning . PHP_EOL);
+        }
+    }
+
     /**
      * @return array{
      *     mode: string,
@@ -491,6 +755,7 @@ final class Application
         $showConfig = false;
         $configMode = false;
         $dumpPrompt = false;
+        $historyMode = false;
 
         try {
             $input = new ArgvInput($argv, $definition);
@@ -509,6 +774,7 @@ final class Application
         $showConfig = (bool) $input->getOption('show-config');
         $configMode = (bool) $input->getOption('config');
         $dumpPrompt = (bool) $input->getOption('dump-prompt');
+        $historyMode = (bool) $input->getOption('history');
 
         $hasWidgetOption = $input->hasParameterOption('--widget');
         $isExplain = (bool) $input->getOption('explain');
@@ -553,6 +819,7 @@ final class Application
                 showConfig: $showConfig,
                 help: $help,
                 version: $version,
+                history: $historyMode,
                 numOptionName: $numOptionName,
                 timeoutOptionName: $timeoutOptionName,
                 dumpPrompt: $dumpPrompt
@@ -567,9 +834,38 @@ final class Application
             $mode = 'config';
         }
 
+        if ($historyMode) {
+            $conflicts = $this->detectHistoryConflicts(
+                json: $json,
+                shellIntegration: $shellIntegration,
+                dryRun: $dryRun,
+                widget: $hasWidgetOption,
+                explain: $isExplain,
+                showConfig: $showConfig,
+                help: $help,
+                version: $version,
+                config: $configMode,
+                numOptionName: $numOptionName,
+                timeoutOptionName: $timeoutOptionName,
+                dumpPrompt: $dumpPrompt
+            );
+            if ($conflicts !== []) {
+                throw new \RuntimeException(sprintf(
+                    '--history cannot be combined with %s.',
+                    implode(', ', $conflicts)
+                ));
+            }
+
+            $mode = 'history';
+        }
+
         if ($mode === 'widget') {
             $widgetShell = $remaining[0] ?? null;
             $remaining = array_slice($remaining, 1);
+        }
+
+        if ($mode === 'history' && $remaining !== []) {
+            throw new \RuntimeException('--history does not accept a prompt.');
         }
 
         return [
@@ -611,6 +907,7 @@ final class Application
         $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
         $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
         $output->writeln('Use --config set <key> <value> to edit the ~/.shsuggest(.toml) file safely.');
+        $output->writeln('Use --history to browse previously selected suggestions.');
     }
 
     private function printVersion(): void
@@ -779,6 +1076,7 @@ final class Application
         bool $showConfig,
         bool $help,
         bool $version,
+        bool $history,
         bool $dumpPrompt,
         ?string $numOptionName,
         ?string $timeoutOptionName
@@ -814,6 +1112,79 @@ final class Application
 
         if ($version) {
             $conflicts[] = '--version';
+        }
+
+        if ($history) {
+            $conflicts[] = '--history';
+        }
+
+        if ($dumpPrompt) {
+            $conflicts[] = '--dump-prompt';
+        }
+
+        if ($numOptionName !== null) {
+            $conflicts[] = $numOptionName;
+        }
+
+        if ($timeoutOptionName !== null) {
+            $conflicts[] = $timeoutOptionName;
+        }
+
+        return $conflicts;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function detectHistoryConflicts(
+        bool $json,
+        bool $shellIntegration,
+        bool $dryRun,
+        bool $widget,
+        bool $explain,
+        bool $showConfig,
+        bool $help,
+        bool $version,
+        bool $config,
+        ?string $numOptionName,
+        ?string $timeoutOptionName,
+        bool $dumpPrompt
+    ): array {
+        $conflicts = [];
+        if ($json) {
+            $conflicts[] = '--json';
+        }
+
+        if ($shellIntegration) {
+            $conflicts[] = '--shell';
+        }
+
+        if ($dryRun) {
+            $conflicts[] = '--dry-run';
+        }
+
+        if ($widget) {
+            $conflicts[] = '--widget';
+        }
+
+        if ($explain) {
+            $conflicts[] = '--explain';
+        }
+
+        if ($showConfig) {
+            $conflicts[] = '--show-config';
+        }
+
+        if ($help) {
+            $conflicts[] = '--help';
+        }
+
+        if ($version) {
+            $conflicts[] = '--version';
+        }
+
+        if ($config) {
+            $conflicts[] = '--config';
         }
 
         if ($dumpPrompt) {
@@ -1152,6 +1523,7 @@ final class Application
             new InputOption('shell-integration', null, InputOption::VALUE_NONE, 'Alias for --shell (deprecated).'),
             new InputOption('dry-run', null, InputOption::VALUE_NONE, 'Return instantly with dummy suggestions (skips model requests).'),
             new InputOption('dump-prompt', null, InputOption::VALUE_NONE, 'Print the raw LLM prompt that would be sent and exit.'),
+            new InputOption('history', null, InputOption::VALUE_NONE, 'Browse the suggestion history.'),
             new InputOption(
                 'widget',
                 null,
