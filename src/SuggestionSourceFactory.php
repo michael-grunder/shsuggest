@@ -17,6 +17,8 @@ final class SuggestionSourceFactory
         return match ($selected) {
             'ollama' => $this->createOllamaSource(),
             'copilot' => $this->createCopilotSource(),
+            'openai' => $this->createOpenAiSource(),
+            'claude' => $this->createClaudeSource(),
             default => throw new \RuntimeException(sprintf('Unknown suggestion source "%s".', $selected)),
         };
     }
@@ -44,6 +46,38 @@ final class SuggestionSourceFactory
             $binary,
             $this->config->getModel('copilot'),
             $this->config->getRequestTimeout()
+        );
+    }
+
+    private function createOpenAiSource(): SuggestionSource
+    {
+        $settings = $this->config->getSourceSettings('openai');
+        $endpoint = $this->normalizeStringSetting($settings['endpoint'] ?? null, 'https://api.openai.com/v1');
+        $apiKey = $this->normalizeOptionalString($settings['api_key'] ?? null);
+
+        return new OpenAiClient(
+            $endpoint,
+            $apiKey,
+            $this->config->getModel('openai'),
+            $this->config->getTemperature(),
+            $this->config->getRequestTimeout()
+        );
+    }
+
+    private function createClaudeSource(): SuggestionSource
+    {
+        $settings = $this->config->getSourceSettings('claude');
+        $endpoint = $this->normalizeStringSetting($settings['endpoint'] ?? null, 'https://api.anthropic.com');
+        $apiKey = $this->normalizeOptionalString($settings['api_key'] ?? null);
+        $version = $this->normalizeStringSetting($settings['anthropic_version'] ?? null, '2023-06-01');
+
+        return new ClaudeClient(
+            $endpoint,
+            $apiKey,
+            $this->config->getModel('claude'),
+            $this->config->getTemperature(),
+            $this->config->getRequestTimeout(),
+            $version
         );
     }
 
@@ -99,5 +133,16 @@ final class SuggestionSourceFactory
         }
 
         return 11434;
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 }

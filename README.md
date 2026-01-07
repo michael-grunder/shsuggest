@@ -2,8 +2,9 @@ shsuggest
 =========
 
 `shsuggest` is a lightweight replacement for the deprecated `gh copilot suggest`/`explain` commands. It supports
-multiple suggestion sources via pluggable adapters (currently [Ollama](https://ollama.com) and the GitHub Copilot
-CLI) to generate shell commands or explain existing ones, and ships as a single PHAR for easy distribution.
+multiple suggestion sources via pluggable adapters—including local [Ollama](https://ollama.com) instances,
+the GitHub Copilot CLI, and hosted APIs such as OpenAI and Claude—to generate shell commands or explain
+existing ones, and ships as a single PHAR for easy distribution.
 
 ## Installation
 
@@ -15,7 +16,8 @@ chmod +x /usr/local/bin/shsuggest
 ```
 
 > Composer must be installed locally. You'll also need at least one configured source adapter, such as a running
-> Ollama instance (`ollama serve`) or the GitHub Copilot CLI available on your PATH (or set `copilot.binary`).
+> Ollama instance (`ollama serve`), the GitHub Copilot CLI available on your PATH (or set `copilot.binary`),
+> or API keys for OpenAI / Claude if you're targeting those adapters.
 
 ## Usage
 
@@ -101,18 +103,32 @@ scheme = "http"
 [copilot]
 model = "copilot-cli"
 binary = "/home/you/.local/bin/copilot"
+
+[openai]
+model = "gpt-4o-mini"
+api_key = "sk-..."
+endpoint = "https://api.openai.com/v1"
+
+[claude]
+model = "claude-3-5-haiku-latest"
+api_key = "anthropic-key"
+endpoint = "https://api.anthropic.com"
+anthropic_version = "2023-06-01"
 ```
 
 `source` selects which backend to use. `ollama` contacts a local Ollama server over HTTP, while `copilot`
-shells out to the GitHub Copilot CLI (override `copilot.binary` if it lives somewhere else). The `[ollama]`
-table accepts a full `endpoint` or separate host/port/scheme parts (the endpoint wins when both are provided)
-as well as the `model` to query. The legacy top-level `ollama_endpoint` and `model` keys are still honored for
-backwards compatibility. Additional adapters can be added over time; the `source` key just picks the one you
-want to use.
+shells out to the GitHub Copilot CLI (override `copilot.binary` if it lives somewhere else). `openai` and
+`claude` talk to the respective hosted APIs using the configured endpoint and API key. Set `openai.api_key`
+or `claude.api_key` in the config file or rely on the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` environment
+variables (`CLAUDE_API_KEY` is also accepted). The `[ollama]` table accepts a full `endpoint` or separate
+host/port/scheme parts (the endpoint wins when both are provided) as well as the `model` to query. The legacy
+top-level `ollama_endpoint` and `model` keys are still honored for backwards compatibility. Additional
+adapters can be added over time; the `source` key just picks the one you want to use.
 
 The Copilot adapter ignores `temperature` and thread settings but still respects `num_suggestions`,
-`request_timeout`, and the prompt-rendering options. Customize `copilot.model` if you want the UI to display a
-friendlier name than the default `"copilot-cli"`.
+`request_timeout`, and the prompt-rendering options. The hosted adapters honor the global `temperature`
+value and respect `request_timeout`; customize `copilot.model`, `openai.model`, or `claude.model` if you want
+the UI to display a friendlier label than the defaults.
 
 `num_suggestions` controls the default value passed to `-n/--num` when it isn't provided explicitly.
 Invalid values are ignored (and reset to 1) with a warning.

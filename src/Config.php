@@ -30,6 +30,17 @@ final class Config
             'model' => 'copilot-cli',
             'binary' => 'copilot',
         ],
+        'openai' => [
+            'model' => 'gpt-4o-mini',
+            'endpoint' => 'https://api.openai.com/v1',
+            'api_key' => null,
+        ],
+        'claude' => [
+            'model' => 'claude-3-5-haiku-latest',
+            'endpoint' => 'https://api.anthropic.com',
+            'api_key' => null,
+            'anthropic_version' => '2023-06-01',
+        ],
     ];
 
     /**
@@ -149,6 +160,13 @@ final class Config
                 'ollama.model' => self::SOURCE_DEFAULTS['ollama']['model'],
                 'copilot.model' => self::SOURCE_DEFAULTS['copilot']['model'],
                 'copilot.binary' => self::SOURCE_DEFAULTS['copilot']['binary'],
+                'openai.model' => self::SOURCE_DEFAULTS['openai']['model'],
+                'openai.endpoint' => self::SOURCE_DEFAULTS['openai']['endpoint'],
+                'openai.api_key' => null,
+                'claude.model' => self::SOURCE_DEFAULTS['claude']['model'],
+                'claude.endpoint' => self::SOURCE_DEFAULTS['claude']['endpoint'],
+                'claude.api_key' => null,
+                'claude.anthropic_version' => self::SOURCE_DEFAULTS['claude']['anthropic_version'],
             ]
         );
     }

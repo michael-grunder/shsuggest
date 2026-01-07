@@ -1332,7 +1332,9 @@ final class Application
         return match ($key) {
             'num_suggestions', 'request_timeout', 'num_thread' => $this->parseConfigInt($trimmed, $key),
             'temperature' => $this->parseTemperature($trimmed),
-            'ollama_endpoint' => $this->parseEndpoint($trimmed),
+            'ollama_endpoint',
+            'openai.endpoint',
+            'claude.endpoint' => $this->parseEndpoint($trimmed, $key),
             'pipe_first_into' => $this->parsePipeProgram($trimmed),
             'ollama.model' => $this->validateModelChoice($trimmed),
             'source' => $this->normalizeSourceName($trimmed),
@@ -1379,16 +1381,16 @@ final class Application
         return $float;
     }
 
-    private function parseEndpoint(string $value): string
+    private function parseEndpoint(string $value, string $label): string
     {
         $endpoint = filter_var($value, FILTER_VALIDATE_URL);
         if ($endpoint === false) {
-            throw new \RuntimeException('Please provide a valid URL for "ollama_endpoint".');
+            throw new \RuntimeException(sprintf('Please provide a valid URL for "%s".', $label));
         }
 
         $scheme = strtolower((string) parse_url($endpoint, PHP_URL_SCHEME));
         if (!in_array($scheme, ['http', 'https'], true)) {
-            throw new \RuntimeException('ollama_endpoint must use http or https.');
+            throw new \RuntimeException(sprintf('%s must use http or https.', $label));
         }
 
         return rtrim($endpoint, '/');
