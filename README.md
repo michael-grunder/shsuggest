@@ -78,7 +78,19 @@ eval "$(shsuggest --widget='\C-r' bash)"
 eval "$(shsuggest --widget='^R' zsh)"
 ```
 
-Re-run the command whenever you update the binary so the hook stays in sync.
+The generated script now also defines a dedicated history widget that binds <kbd>Ctrl</kbd>+<kbd>H</kbd> to
+`shsuggest --history`, so re-running `eval "$(shsuggest --widget SHELL)"` keeps both widgets in sync. Override
+that second binding with `--history-binding`:
+
+```bash
+# Bash
+eval "$(shsuggest --widget bash --history-binding='\C-y')"
+
+# Zsh
+eval "$(shsuggest --widget='^R' --history-binding='^Y' zsh)"
+```
+
+Re-run the command whenever you update the binary so the hooks stay in sync.
 
 ## Configuration
 

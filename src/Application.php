@@ -39,6 +39,7 @@ final class Application
     ];
 
     private const DEFAULT_WIDGET_BINDING = '\C-g';
+    private const DEFAULT_HISTORY_WIDGET_BINDING = '\C-h';
 
     private PipeRunner $pipeRunner;
     private OutputFormatter $stdoutFormatter;
@@ -124,12 +125,13 @@ final class Application
 
         if ($mode === 'widget') {
             $binding = $options['widget_binding'] ?? self::DEFAULT_WIDGET_BINDING;
+            $historyBinding = $options['history_widget_binding'] ?? self::DEFAULT_HISTORY_WIDGET_BINDING;
             $shell = $options['widget_shell'];
             if ($shell === null || $shell === '') {
                 throw new \RuntimeException('Please specify the target shell (bash or zsh).');
             }
 
-            $this->emitShellWidget($binding, $shell, $argv);
+            $this->emitShellWidget($binding, $historyBinding, $shell, $argv);
 
             return 0;
         }
@@ -480,7 +482,12 @@ final class Application
 
         $entries = array_values(array_reverse($entries));
 
+        $widgetInvocation = $this->isShellWidgetInvocation();
         if (!$this->isInteractive()) {
+            if ($widgetInvocation) {
+                return $this->relaunchHistoryWidgetInTty();
+            }
+
             foreach ($entries as $entry) {
                 $command = trim((string) ($entry['command'] ?? ''));
                 if ($command !== '') {
@@ -514,6 +521,66 @@ final class Application
         $this->renderSelectedHistory($command, true);
 
         return 0;
+    }
+
+    private function relaunchHistoryWidgetInTty(): int
+    {
+        $tty = $this->detectTtyDevicePath();
+        if ($tty === null) {
+            throw new \RuntimeException('Unable to open the controlling TTY for the history widget.');
+        }
+
+        $binary = $this->resolveBinaryPath($_SERVER['argv'][0] ?? null, false);
+        $command = sprintf('%s --history', escapeshellarg($binary));
+        $descriptorSpec = [
+            0 => ['file', $tty, 'r'],
+            1 => ['file', $tty, 'w'],
+            2 => ['file', $tty, 'w'],
+        ];
+
+        $process = @proc_open($command, $descriptorSpec, $pipes, null, null);
+        if (!is_resource($process)) {
+            throw new \RuntimeException('Failed to spawn the history widget inside a TTY.');
+        }
+
+        return proc_close($process);
+    }
+
+    private function detectTtyDevicePath(): ?string
+    {
+        $candidates = [];
+        $envTty = getenv('TTY');
+        if (is_string($envTty) && $envTty !== '') {
+            $candidates[] = $envTty;
+        }
+
+        if (function_exists('posix_ttyname')) {
+            foreach ([STDIN, STDOUT, STDERR] as $stream) {
+                $ttyName = @posix_ttyname($stream);
+                if ($ttyName !== false && $ttyName !== '') {
+                    $candidates[] = $ttyName;
+                }
+            }
+        }
+
+        $candidates[] = '/dev/tty';
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate) || $candidate === '') {
+                continue;
+            }
+
+            $handle = @fopen($candidate, 'r+');
+            if ($handle === false) {
+                continue;
+            }
+
+            fclose($handle);
+
+            return $candidate;
+        }
+
+        return null;
     }
 
     /**
@@ -688,6 +755,30 @@ final class Application
         }
 
         $this->writeLine($this->style($command, 'command', STDOUT));
+        $this->captureSelectedHistoryForWidget($command);
+    }
+
+    private function captureSelectedHistoryForWidget(string $command): void
+    {
+        $path = getenv('SHSUGGEST_HISTORY_CAPTURE');
+        if ($path === false) {
+            return;
+        }
+
+        $path = trim($path);
+        if ($path === '') {
+            return;
+        }
+
+        $result = @file_put_contents($path, $command);
+        if ($result === false) {
+            $warning = sprintf(
+                '%s Failed to write the selected history entry to "%s".',
+                $this->style('⚠ Warning:', 'error', STDERR),
+                $path
+            );
+            fwrite(STDERR, $warning . PHP_EOL);
+        }
     }
 
     private function recordHistory(
@@ -733,6 +824,7 @@ final class Application
      *     dry-run: bool,
      *     widget_binding: ?string,
      *     widget_shell: ?string,
+     *     history_widget_binding: ?string,
      *     timeout: ?int,
      *     show_config: bool,
      *     dump_prompt: bool,
@@ -750,6 +842,7 @@ final class Application
         $shellIntegration = false;
         $widgetBinding = null;
         $widgetShell = null;
+        $historyWidgetBinding = null;
         $dryRun = false;
         $timeout = null;
         $showConfig = false;
@@ -793,6 +886,14 @@ final class Application
             }
         } elseif ($isExplain) {
             $mode = 'explain';
+        }
+
+        $historyBindingOptionValue = $input->getOption('history-binding');
+        if ($historyBindingOptionValue !== null) {
+            if (!$hasWidgetOption) {
+                throw new \RuntimeException('--history-binding can only be used together with --widget.');
+            }
+            $historyWidgetBinding = (string) $historyBindingOptionValue;
         }
 
         $numOption = $input->getOption('num');
@@ -878,6 +979,7 @@ final class Application
             'dry-run' => $dryRun,
             'widget_binding' => $widgetBinding,
             'widget_shell' => $widgetShell,
+            'history_widget_binding' => $historyWidgetBinding,
             'timeout' => $timeout,
             'show_config' => $showConfig,
             'dump_prompt' => $dumpPrompt,
@@ -907,7 +1009,7 @@ final class Application
         $output->writeln('PROMPT or COMMAND values can also be provided via STDIN when omitted.');
         $output->writeln('Pass -n greater than 1 from an interactive terminal to browse suggestions interactively.');
         $output->writeln('Use --config set <key> <value> to edit the ~/.shsuggest(.toml) file safely.');
-        $output->writeln('Use --history to browse previously selected suggestions.');
+        $output->writeln('Use --history to browse previously selected suggestions or --widget to bind both widgets inside your shell.');
     }
 
     private function printVersion(): void
@@ -1531,9 +1633,15 @@ final class Application
                 null,
                 InputOption::VALUE_OPTIONAL,
                 sprintf(
-                    'Print a ready-to-use shell widget for bash or zsh. Provide the shell name as the final argument and optionally override the key binding (default %s).',
+                    'Print ready-to-use shell widgets for bash or zsh. Provide the shell name as the final argument and optionally override the suggestion key binding (default %s).',
                     self::DEFAULT_WIDGET_BINDING
                 )
+            ),
+            new InputOption(
+                'history-binding',
+                null,
+                InputOption::VALUE_REQUIRED,
+                sprintf('Override the history browser binding emitted by --widget (default %s).', self::DEFAULT_HISTORY_WIDGET_BINDING)
             ),
         ]);
     }
@@ -1868,21 +1976,24 @@ final class Application
         fwrite(STDERR, $message . PHP_EOL);
     }
 
-    private function emitShellWidget(string $binding, string $shell, array $argv): void
+    private function emitShellWidget(string $binding, string $historyBinding, string $shell, array $argv): void
     {
         $binding = $binding !== '' ? $binding : self::DEFAULT_WIDGET_BINDING;
+        $historyBinding = $historyBinding !== '' ? $historyBinding : self::DEFAULT_HISTORY_WIDGET_BINDING;
         $binary = $this->resolveBinaryPath($argv[0] ?? null);
         $shell = strtolower($shell);
 
         if ($shell === 'zsh') {
             $widget = $this->renderZshWidget($binary, $binding);
+            $historyWidget = $this->renderZshHistoryWidget($binary, $historyBinding);
         } elseif ($shell === 'bash') {
             $widget = $this->renderBashWidget($binary, $binding);
+            $historyWidget = $this->renderBashHistoryWidget($binary, $historyBinding);
         } else {
             throw new \RuntimeException(sprintf('Unsupported shell "%s". Expected "bash" or "zsh".', $shell));
         }
 
-        $this->writeLine($widget);
+        $this->write($widget . PHP_EOL . $historyWidget);
     }
 
     private function renderBashWidget(string $binary, string $binding): string
@@ -1900,6 +2011,31 @@ _shsuggest_widget() {
 }
 
 bind -x '"__BINDING__":"_shsuggest_widget"'
+BASH;
+
+        return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
+    }
+
+    private function renderBashHistoryWidget(string $binary, string $binding): string
+    {
+        $escapedBinding = $this->escapeForDoubleQuotes($binding);
+
+        $widget = <<<'BASH'
+# shsuggest history readline widget
+_shsuggest_history_widget() {
+    local cmd tmpfile
+    tmpfile="$(mktemp "${TMPDIR:-/tmp}/shsuggest-history.XXXXXX" 2>/dev/null || mktemp -t shsuggest-history 2>/dev/null)" || return
+    SHSUGGEST_WIDGET=1 SHSUGGEST_HISTORY_CAPTURE="$tmpfile" __BINARY__ --history || { rm -f "$tmpfile"; return; }
+    cmd="$(<"$tmpfile")"
+    rm -f "$tmpfile"
+    if [[ -z "$cmd" ]]; then
+        return
+    fi
+    READLINE_LINE=$cmd
+    READLINE_POINT=${#READLINE_LINE}
+}
+
+bind -x '"__BINDING__":"_shsuggest_history_widget"'
 BASH;
 
         return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
@@ -1928,7 +2064,35 @@ ZSH;
         return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
     }
 
-    private function resolveBinaryPath(?string $binary): string
+    private function renderZshHistoryWidget(string $binary, string $binding): string
+    {
+        $binding = $this->normalizeZshBinding($binding);
+        $escapedBinding = $this->escapeForDoubleQuotes($binding);
+
+        $widget = <<<'ZSH'
+# shsuggest history zle widget
+_shsuggest_history_widget() {
+    local cmd tmpfile
+    tmpfile="$(mktemp "${TMPDIR:-/tmp}/shsuggest-history.XXXXXX" 2>/dev/null || mktemp -t shsuggest-history 2>/dev/null)" || return
+    SHSUGGEST_WIDGET=1 SHSUGGEST_HISTORY_CAPTURE="$tmpfile" __BINARY__ --history || { rm -f "$tmpfile"; return; }
+    cmd="$(<"$tmpfile")"
+    rm -f "$tmpfile"
+    if [[ -z "$cmd" ]]; then
+        return
+    fi
+    BUFFER=$cmd
+    CURSOR=${#BUFFER}
+    zle reset-prompt
+}
+
+zle -N shsuggest-history-widget _shsuggest_history_widget
+bindkey "__BINDING__" shsuggest-history-widget
+ZSH;
+
+        return str_replace(['__BINARY__', '__BINDING__'], [$binary, $escapedBinding], $widget);
+    }
+
+    private function resolveBinaryPath(?string $binary, bool $escape = true): string
     {
         $binary = $binary ?? 'shsuggest';
         if ($binary === '') {
@@ -1940,7 +2104,7 @@ ZSH;
             $binary = $resolved;
         }
 
-        return escapeshellarg($binary);
+        return $escape ? escapeshellarg($binary) : $binary;
     }
 
     private function escapeForDoubleQuotes(string $value): string
